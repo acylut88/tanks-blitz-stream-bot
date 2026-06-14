@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     vk_channel_owner_id: int = 29850510
     chat_page_url: str = "https://live.vkvideo.ru/scr/stream/default/only-chat"
 
+    # Веб-интерфейс и авторизация
+    admin_username: str = "admin"
+    admin_password: str = "supersecretpassword"  
+
     # Награды
     allowed_reward_name: str = "Поставка техники"  # 
     

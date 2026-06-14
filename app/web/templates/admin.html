@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Админка</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white p-8" x-data="adminData()">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-red-500">⚙️ Админ-панель</h1>
+            <a href="/logout" class="text-sm text-gray-400 hover:text-white">Выйти</a>
+        </div>
+
+        <!-- Начисление ПА -->
+        <div class="bg-gray-800 p-6 rounded-lg mb-6">
+            <h2 class="text-xl font-bold mb-4">🎖 Начислить Офицерский Штаб (ПА)</h2>
+            <div class="flex gap-4">
+                <input type="text" x-model="nick" placeholder="Ник зрителя" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600">
+                <input type="number" x-model="streams" placeholder="Кол-во стримов" class="w-32 p-2 rounded bg-gray-700 border border-gray-600">
+                <button @click="grantPA()" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-2 rounded font-bold">Начислить</button>
+            </div>
+            <p x-show="msg" x-text="msg" class="mt-2 text-green-400"></p>
+        </div>
+
+        <!-- Настройка диспетчера -->
+        <div class="bg-gray-800 p-6 rounded-lg">
+            <h2 class="text-xl font-bold mb-4">⚡ Задержка отправки сообщений</h2>
+            <div class="flex items-center gap-4">
+                <input type="range" min="0.1" max="2.0" step="0.1" x-model="delay" @input="updateDelay()" class="flex-1">
+                <span class="text-xl font-mono w-16 text-right" x-text="delay + ' сек'"></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function adminData() {
+            return {
+                nick: '', streams: 1, delay: 0.4, msg: '',
+                async grantPA() {
+                    const res = await fetch('/api/admin/grant-premium', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ nick: this.nick, streams: parseInt(this.streams) })
+                    });
+                    const data = await res.json();
+                    this.msg = data.message;
+                    this.nick = '';
+                    setTimeout(() => this.msg = '', 3000);
+                },
+                async updateDelay() {
+                    await fetch('/api/admin/dispatcher-delay', {
+                        method: 'PATCH',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ delay: parseFloat(this.delay) })
+                    });
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Дашборд Стримера</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white p-8" x-data="dashboardData()" x-init="fetchStats()">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-yellow-500">🎮 Дашборд Командира</h1>
+            <a href="/logout" class="text-sm text-gray-400 hover:text-white">Выйти</a>
+        </div>
+
+        <!-- Статистика -->
+        <div class="grid grid-cols-3 gap-4 mb-8">
+            <div class="bg-gray-800 p-4 rounded-lg text-center">
+                <div class="text-gray-400 text-sm">Активных командиров</div>
+                <div class="text-3xl font-bold text-green-400" x-text="stats.active_users || 0">0</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg text-center">
+                <div class="text-gray-400 text-sm">Всего БМ в армии</div>
+                <div class="text-3xl font-bold text-blue-400" x-text="stats.total_bm || 0">0</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg text-center">
+                <div class="text-gray-400 text-sm">Сообщений в очереди</div>
+                <div class="text-3xl font-bold text-yellow-400" x-text="stats.queue_size || 0">0</div>
+            </div>
+        </div>
+
+        <!-- Кнопки управления -->
+        <div class="grid grid-cols-3 gap-4">
+            <button @click="action('start')" class="bg-green-600 hover:bg-green-500 text-white font-bold py-4 px-6 rounded-lg transition flex flex-col items-center">
+                <span class="text-2xl mb-2">🟢</span>
+                <span>Новый стрим</span>
+            </button>
+            <button @click="action('stop')" class="bg-red-600 hover:bg-red-500 text-white font-bold py-4 px-6 rounded-lg transition flex flex-col items-center">
+                <span class="text-2xl mb-2">🔴</span>
+                <span>Стоп стрим</span>
+            </button>
+            <button @click="action('raffle')" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 px-6 rounded-lg transition flex flex-col items-center">
+                <span class="text-2xl mb-2">🎰</span>
+                <span>Рулетка (скоро)</span>
+            </button
+            </button>
+        </div>
+        
+        <div x-show="message" x-text="message" class="mt-4 p-3 bg-gray-800 rounded text-center text-green-400"></div>
+    </div>
+
+    <script>
+        function dashboardData() {
+            return {
+                stats: { active_users: 0, total_bm: 0, queue_size: 0 },
+                message: '',
+                async fetchStats() {
+                    const res = await fetch('/api/stream/stats');
+                    this.stats = await res.json();
+                    setTimeout(() => this.fetchStats(), 5000); // Обновление каждые 5 сек
+                },
+                async action(type) {
+                    this.message = 'Выполняется...';
+                    const res = await fetch(`/api/stream/${type}`, { method: 'POST' });
+                    const data = await res.json();
+                    this.message = data.message;
+                    setTimeout(() => this.message = '', 3000);
+                    this.fetchStats();
+                }
+            }
+        }
+    </script>
+</body>
+</html>

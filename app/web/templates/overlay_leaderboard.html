@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Лидерборд</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { background-color: transparent; } /* Прозрачный фон для OBS */
+    </style>
+</head>
+<body class="text-white p-4" x-data="lbData()" x-init="fetchTop()">
+    <div class="bg-gray-900/80 backdrop-blur-sm rounded-lg p-4 border border-yellow-600/50">
+        <h2 class="text-xl font-bold text-yellow-500 mb-3 text-center">🏆 Топ Полководцев</h2>
+        <div class="space-y-2">
+            <template x-for="(player, index) in top" :key="player.nick">
+                <div class="flex justify-between items-center bg-gray-800/80 p-2 rounded">
+                    <div class="flex items-center gap-3">
+                        <span class="text-yellow-500 font-bold w-6" x-text="index + 1 + '.'"></span>
+                        <span x-text="player.nick"></span>
+                    </div>
+                    <span class="text-blue-400 font-mono" x-text="player.bm + ' БМ'"></span>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <script>
+        function lbData() {
+            return {
+                top: [],
+                async fetchTop() {
+                    const res = await fetch('/api/stream/top');
+                    this.top = await res.json();
+                    setTimeout(() => this.fetchTop(), 10000); // Обновление каждые 10 сек
+                }
+            }
+        }
+    </script>
+</body>
+</html>
