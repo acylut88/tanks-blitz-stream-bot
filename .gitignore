@@ -1,0 +1,39 @@
+# Виртуальное окружение
+.venv/
+venv/
+env/
+
+# База данных SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Профиль браузера Playwright
+browser_profile/
+playwright-report/
+
+# Переменные окружения (секреты!)
+.env
+.env.local
+.env.test
+.env.prod
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи
+*.log
+logs/
+
+# OS файлы
+.DS_Store
+Thumbs.db
