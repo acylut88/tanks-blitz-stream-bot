@@ -172,5 +172,10 @@ class CommandRouter:
             logger.error("Stop stream error", error=str(e))
 
     async def cmd_raffle(self, nick: str):
-        """Заглушка для запуска розыгрыша (реализуем в Этапе 6)"""
-        await self.dispatcher.add_message(nick, "🎰 Рулетка на вылет скоро будет подключена! (Этап 6)")
+        """Запуск рулетки на вылет"""
+        await self.dispatcher.add_message(nick, "🎰 Командиры, приготовьтесь! Рулетка запускается... Следите за оверлеем!")
+        
+        import asyncio
+        from app.api.websocket import run_raffle_process
+        # Запускаем в фоне, чтобы не блокировать чат
+        asyncio.create_task(run_raffle_process())

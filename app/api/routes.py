@@ -1,15 +1,17 @@
 """
 Web и API маршруты для админки, дашборда и оверлеев
 """
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Response, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from app.api.websocket import run_raffle_process
 from app.config import settings
-from app.services.user_service import UserService
-from app.database.session import async_session
 from app.database.models import User, StreamStats, StreamSession
+from app.database.session import async_session
+from app.services.user_service import UserService
 from sqlalchemy import select, func, desc, distinct
-from datetime import datetime, timezone
+import asyncio
 import structlog
 
 logger = structlog.get_logger()
@@ -70,6 +72,10 @@ async def admin_page(request: Request):
 @router.get("/overlay/leaderboard", response_class=HTMLResponse)
 async def overlay_lb(request: Request):
     return templates.TemplateResponse("overlay_leaderboard.html", {"request": request})
+
+@router.get("/overlay/raffle", response_class=HTMLResponse)
+async def overlay_raffle(request: Request):
+    return templates.TemplateResponse("overlay_raffle.html", {"request": request})
 
 # --- API Эндпоинты для фронтенда ---
 @router.get("/api/stream/stats")
@@ -159,7 +165,12 @@ async def stop_stream_api():
 
 @router.post("/api/stream/raffle")
 async def raffle_api():
-    return {"message": "🎰 Рулетка скоро будет подключена!"}
+   
+    
+    # Запускаем рулетку в фоне
+    asyncio.create_task(run_raffle_process())
+    
+    return {"message": "🎰 Рулетка запущена! Открой оверлей для просмотра."}
 
 @router.post("/api/admin/grant-premium")
 async def grant_premium_api(request: dict):

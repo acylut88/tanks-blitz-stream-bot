@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Рулетка на вылет</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { 
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 25%, #1a1a1a 50%, #3d3d3d 75%, #1a1a1a 100%);
+            background-size: 100px 100px;
+            margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; position: relative;
+        }
+        body::before {
+            content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(0,0,0,0.1) 35px, rgba(0,0,0,0.1) 70px),
+                              repeating-linear-gradient(-45deg, transparent, transparent 35px, rgba(0,0,0,0.05) 35px, rgba(0,0,0,0.05) 70px);
+            pointer-events: none; z-index: 0;
+        }
+        .participant { 
+            transition: border-color 0.1s ease, box-shadow 0.1s ease; 
+            border: 3px solid transparent; 
+            position: relative; 
+            z-index: 1;
+            min-height: 80px;
+        }
+        .roulette-active { animation: redPulse 0.6s ease-in-out infinite; }
+        @keyframes redPulse {
+            0% { border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); background-color: rgba(127, 29, 29, 0.3); }
+            50% { border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 35px rgba(239, 68, 68, 0.9); background-color: rgba(127, 29, 29, 1); }
+            100% { border-color: rgba(239, 68, 68, 0.4); box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); background-color: rgba(127, 29, 29, 0.3); }
+        }
+        .winner { border-color: #fbbf24 !important; box-shadow: 0 0 30px #fbbf24; animation: winnerGlow 2s infinite alternate; background-color: #422006 !important; }
+        @keyframes winnerGlow { from { box-shadow: 0 0 10px #fbbf24; } to { box-shadow: 0 0 40px #f59e0b; } }
+        
+        .participants-grid, .eliminated-list { max-height: 75vh; overflow-y: auto; }
+        .military-border { border: 2px solid #4a4a4a; box-shadow: inset 0 0 20px rgba(0,0,0,0.5); }
+        
+        .chance-bar-bg { background-color: #374151; height: 4px; border-radius: 2px; overflow: hidden; margin-top: 4px; }
+        .chance-bar-fill { height: 100%; transition: width 0.5s ease; }
+        .eliminated-tile { background: linear-gradient(135deg, #374151 0%, #1f2937 100%); border: 1px solid #4b5563; }
+
+        /* Стили для модального окна */
+        .modal-enter { animation: modalFadeIn 0.3s ease-out; }
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="text-white p-4 w-full h-screen" x-data="raffleData()" x-init="connectWS()">
+    
+    <!-- СТАТУС-БАР -->
+    <div class="fixed top-4 left-1/2 transform -translate-x-1/2 bg-black/90 px-8 py-3 rounded-xl border-2 border-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.5)] z-50 text-center min-w-[400px]">
+        <div class="text-2xl font-black text-yellow-400 tracking-wider uppercase" x-text="statusText"></div>
+        <div class="text-lg text-gray-300 mt-1 font-bold" x-show="state !== 'finished'">
+            В строю: <span class="text-white font-black" x-text="displayParticipants.length"></span> командиров
+        </div>
+    </div>
+
+    <!-- КНОПКА ИНФОРМАЦИИ (всегда видна) -->
+    <button @click="showInfo = true" 
+            class="fixed top-4 right-4 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg border-2 border-blue-400 shadow-lg z-50 transition transform hover:scale-105">
+        ℹ️ Правила
+    </button>
+
+    <!-- МОДАЛЬНОЕ ОКНО С ИНФОРМАЦИЕЙ -->
+    <div x-show="showInfo" 
+         x-cloak
+         @click.self="showInfo = false"
+         class="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4 modal-enter">
+        
+        <div class="bg-gray-900 border-2 border-yellow-500 rounded-xl max-w-3xl max-h-[85vh] overflow-y-auto shadow-[0_0_40px_rgba(234,179,8,0.5)]">
+            <!-- Заголовок -->
+            <div class="bg-gradient-to-r from-yellow-700 to-yellow-600 p-4 flex justify-between items-center sticky top-0">
+                <h2 class="text-2xl font-black text-white">📜 ПРАВИЛА РОЗЫГРЫША</h2>
+                <button @click="showInfo = false" class="text-white hover:text-yellow-200 text-2xl font-bold">×</button>
+            </div>
+
+            <div class="p-6 space-y-6">
+                <!-- Призы -->
+                <div class="bg-gray-800/60 rounded-lg p-4 border border-gray-600">
+                    <h3 class="text-xl font-bold text-yellow-400 mb-3">🏆 ПРИЗЫ</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-yellow-900/30 border border-yellow-600 rounded p-3">
+                            <div class="text-yellow-400 font-bold text-lg">🥇 1 место</div>
+                            <div class="text-white text-sm mt-1">📦 10 лутбоксов = 10 танков</div>
+                        </div>
+                        <div class="bg-gray-700/30 border border-gray-400 rounded p-3">
+                            <div class="text-gray-300 font-bold text-lg">🥈 2 место</div>
+                            <div class="text-white text-sm mt-1">📦 8 лутбоксов = 8 танков</div>
+                        </div>
+                        <div class="bg-orange-900/30 border border-orange-600 rounded p-3">
+                            <div class="text-orange-400 font-bold text-lg">🥉 3 место</div>
+                            <div class="text-white text-sm mt-1">📦 6 лутбоксов = 6 танков</div>
+                        </div>
+                        <div class="bg-gray-700/30 border border-gray-500 rounded p-3">
+                            <div class="text-gray-400 font-bold text-lg">💥 Выбывшие</div>
+                            <div class="text-white text-sm mt-1">📦 4 лутбокса = 4 танка</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Как работает -->
+                <div class="bg-gray-800/60 rounded-lg p-4 border border-gray-600">
+                    <h3 class="text-xl font-bold text-green-400 mb-3">⚙️ КАК ЭТО РАБОТАЕТ</h3>
+                    <ul class="space-y-2 text-sm text-gray-300">
+                        <li class="flex items-start">
+                            <span class="text-green-400 mr-2">1.</span>
+                            <span><strong>Боевая Мощь (БМ)</strong> определяет твои шансы. Чем больше БМ, тем выше шанс остаться в игре!</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-400 mr-2">2.</span>
+                            <span>Каждый участник получает <strong>шанс на выживание = (Твоя БМ / Общая БМ всех) × 100%</strong></span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-400 mr-2">3.</span>
+                            <span>Рулетка случайно выбирает кто вылетает. <strong>Чем меньше БМ — тем выше шанс вылететь!</strong></span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-400 mr-2">4.</span>
+                            <span>Процесс повторяется пока не останется <strong>топ-3 победителя</strong></span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-400 mr-2">5.</span>
+                            <span><strong>Все выбывшие получают утешительный приз</strong> — 4 лутбокса!</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Как заработать БМ -->
+                <div class="bg-gray-800/60 rounded-lg p-4 border border-gray-600">
+                    <h3 class="text-xl font-bold text-blue-400 mb-3">💪 КАК ЗАРАБОТАТЬ БМ</h3>
+                    <ul class="space-y-2 text-sm text-gray-300">
+                        <li>• Активируй награды во время стрима ("Поставка техники")</li>
+                        <li>• Каждая активация даёт случайные танки</li>
+                        <li>• Танки имеют разную Боевую Мощь:</li>
+                        <li class="pl-4 text-xs">
+                             ЛТ = 1 БМ | 🔵 СТ = 2 БМ | 🟣 ТТ = 3 БМ | 🟠 ПТ-САУ = 4 БМ
+                        </li>
+                        <li>• Чем больше танков накопишь — тем выше шансы на победу!</li>
+                    </ul>
+                </div>
+
+                <!-- Важные моменты -->
+                <div class="bg-gray-800/60 rounded-lg p-4 border border-gray-600">
+                    <h3 class="text-xl font-bold text-red-400 mb-3">⚠️ ВАЖНО</h3>
+                    <ul class="space-y-2 text-sm text-gray-300">
+                        <li>• Розыгрыш проходит только среди участников <strong>текущего стрима</strong></li>
+                        <li>• Учитывается только БМ, накопленная <strong>в этой сессии</strong></li>
+                        <li>• Минимум 4 участника для начала розыгрыша</li>
+                        <li>• Стример управляет темпом через кнопку "Следующий шаг"</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Кнопка закрытия внизу -->
+            <div class="p-4 border-t border-gray-700 bg-gray-800/60 sticky bottom-0">
+                <button @click="showInfo = false" 
+                        class="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-6 rounded-lg transition">
+                    ЗАКРЫТЬ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ЭКРАН ВО ВРЕМЯ РОЗЫГРЫША -->
+    <div x-show="state !== 'finished'" class="flex h-full gap-4 relative z-10 mt-24">
+        <div class="flex-1 bg-gray-900/90 rounded-lg p-4 military-border flex flex-col">
+            <h2 class="text-2xl font-bold text-center text-yellow-400 mb-4">⚔️ УЧАСТНИКИ ⚔️</h2>
+            <div x-show="showButton" class="text-center mb-4">
+                <button @click="requestNext()" :disabled="isAnimating"
+                        class="bg-red-600 hover:bg-red-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-8 rounded-lg transition transform hover:scale-105 text-xl border-2 border-red-800 shadow-lg">
+                    <span x-show="!isAnimating">💥 СЛЕДУЮЩИЙ ШАГ</span>
+                    <span x-show="isAnimating">⏳ Крутим...</span>
+                </button>
+            </div>
+            <div class="participants-grid flex-1">
+                <div class="grid grid-cols-2 gap-3">
+                    <template x-for="p in displayParticipants" :key="p.nick">
+                        <div class="participant bg-gray-800/90 rounded flex justify-between items-center"
+                             :class="{ 
+                                 'roulette-active': p.nick === currentRoulette, 
+                                 'winner': winners.includes(p.nick),
+                                 'p-5 border-4 text-2xl': getPlace(p.nick) === 1,
+                                 'p-4 border-[3px] text-xl': getPlace(p.nick) === 2,
+                                 'p-3.5 border-2 text-lg': getPlace(p.nick) === 3,
+                                 'p-3 border-0 text-base': !winners.includes(p.nick)
+                             }">
+                            <div class="flex-1">
+                                <div class="font-black" x-text="p.nick"></div>
+                                <div class="text-sm text-gray-400" x-text="p.bm + ' БМ'"></div>
+                                <div x-show="!winners.includes(p.nick) && !eliminatedList.find(e => e.nick === p.nick)" class="mt-1">
+                                    <div class="flex justify-between text-[10px] font-bold mb-0.5">
+                                        <span class="text-gray-400">Шанс:</span>
+                                        <span class="text-green-400" x-text="getSurvivalChance(p).toFixed(1) + '%'"></span>
+                                    </div>
+                                    <div class="chance-bar-bg">
+                                        <div class="chance-bar-fill bg-gradient-to-r from-green-600 to-green-400" :style="`width: ${getSurvivalChance(p)}%`"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div x-show="winners.includes(p.nick)" class="text-yellow-400 font-bold bg-black/60 px-3 py-2 rounded border border-yellow-600/50 flex flex-col items-end ml-2">
+                                <span class="text-sm text-gray-300" x-text="getPlaceText(p.nick)"></span>
+                                <span x-text="getPrize(p.nick)"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <div class="w-80 bg-gray-900/90 rounded-lg p-4 military-border flex flex-col">
+            <h3 class="text-xl font-bold text-center text-red-400 mb-4">💥 ВЫБЫЛИ</h3>
+            <div class="eliminated-list flex-1 space-y-2">
+                <template x-for="e in eliminatedList" :key="e.nick">
+                    <div class="bg-gray-800/60 p-3 rounded border-l-4 border-gray-500 flex justify-between items-center">
+                        <div>
+                            <div class="text-red-300 font-bold text-lg" x-text="e.nick"></div>
+                            <div class="text-xs text-gray-500" x-text="e.bm + ' БМ'"></div>
+                        </div>
+                        <div class="text-gray-300 text-sm font-bold bg-black/40 px-2 py-1 rounded border border-gray-600/50 text-right">
+                            <span class="text-[10px] text-gray-500 block leading-none mb-1">Утешительный:</span>
+                            📦 4 лутбокса<br><span class="text-yellow-500">(4 танка)</span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- ФИНАЛЬНЫЙ ЭКРАН -->
+    <div x-show="state === 'finished'" class="flex flex-col h-full relative z-10 mt-24 gap-4 px-4">
+        <div class="bg-gray-900/90 rounded-lg p-6 military-border">
+            <h2 class="text-3xl font-black text-center text-yellow-400 mb-6 tracking-wider">🏆 ПОБЕДИТЕЛИ РОЗЫГРЫША 🏆</h2>
+            
+            <!-- 1 МЕСТО -->
+            <template x-if="winners.length >= 3">
+                <div class="mb-6">
+                    <div class="bg-gradient-to-r from-yellow-900/60 via-yellow-700/40 to-yellow-900/60 border-4 border-yellow-500 rounded-xl p-6 shadow-[0_0_40px_rgba(251,191,36,0.6)]">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <div class="text-yellow-300 text-sm font-bold mb-1 tracking-widest">🥇 1 МЕСТО — ЧЕМПИОН</div>
+                                <div class="text-4xl font-black text-white" x-text="getWinnerByPlace(1)?.nick || ''"></div>
+                                <div class="text-xl text-gray-300 mt-1" x-text="(getWinnerByPlace(1)?.bm || 0) + ' БМ'"></div>
+                            </div>
+                            <div class="text-right bg-black/50 px-6 py-3 rounded-lg border-2 border-yellow-500">
+                                <div class="text-yellow-400 text-3xl font-black">📦 × 10</div>
+                                <div class="text-yellow-300 text-sm">10 лутбоксов</div>
+                                <div class="text-gray-400 text-xs mt-1">10 танков</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+            
+            <!-- 2 И 3 МЕСТО -->
+            <div class="grid grid-cols-2 gap-4">
+                <template x-if="winners.length >= 2">
+                    <div class="bg-gradient-to-br from-gray-400/30 to-gray-600/20 border-2 border-gray-300 rounded-xl p-4">
+                        <div class="text-gray-300 text-xs font-bold mb-1 tracking-wider">🥈 2 МЕСТО</div>
+                        <div class="text-2xl font-black text-white mb-1" x-text="getWinnerByPlace(2)?.nick || ''"></div>
+                        <div class="text-sm text-gray-400 mb-3" x-text="(getWinnerByPlace(2)?.bm || 0) + ' БМ'"></div>
+                        <div class="flex items-center justify-between bg-black/40 px-3 py-2 rounded border border-gray-400/50">
+                            <span class="text-gray-300 text-sm font-bold">📦 × 8</span>
+                            <span class="text-yellow-500 text-xs">8 лутбоксов = 8 танков</span>
+                        </div>
+                    </div>
+                </template>
+                
+                <template x-if="winners.length >= 1">
+                    <div class="bg-gradient-to-br from-orange-900/30 to-orange-700/20 border-2 border-orange-600 rounded-xl p-4">
+                        <div class="text-orange-400 text-xs font-bold mb-1 tracking-wider">🥉 3 МЕСТО</div>
+                        <div class="text-2xl font-black text-white mb-1" x-text="getWinnerByPlace(3)?.nick || ''"></div>
+                        <div class="text-sm text-gray-400 mb-3" x-text="(getWinnerByPlace(3)?.bm || 0) + ' БМ'"></div>
+                        <div class="flex items-center justify-between bg-black/40 px-3 py-2 rounded border border-orange-600/50">
+                            <span class="text-gray-300 text-sm font-bold">📦 × 6</span>
+                            <span class="text-yellow-500 text-xs">6 лутбоксов = 6 танков</span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- ВЫБЫВШИЕ -->
+        <div class="bg-gray-900/90 rounded-lg p-4 military-border flex-1">
+            <h3 class="text-xl font-bold text-center text-gray-300 mb-2">💥 ВЫБЫВШИЕ УЧАСТНИКИ</h3>
+            <p class="text-center text-yellow-400 text-sm mb-4 font-bold">
+                 Каждый получает утешительный приз: <span class="text-white">4 лутбокса (4 рандомных танка)</span>
+            </p>
+            <div class="grid grid-cols-3 gap-2 max-h-[30vh] overflow-y-auto">
+                <template x-for="e in eliminatedList" :key="e.nick">
+                    <div class="eliminated-tile p-2 rounded flex justify-between items-center">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-gray-200 font-bold text-sm truncate" x-text="e.nick"></div>
+                            <div class="text-[10px] text-gray-500" x-text="e.bm + ' БМ'"></div>
+                        </div>
+                        <div class="text-yellow-500 text-xs font-bold ml-2">📦×4</div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function raffleData() {
+            return {
+                showInfo: false, // Управление модальным окном
+                config: {
+                    prizes: { 
+                        1: "📦 10 лутбоксов (10 танков)", 
+                        2: "📦 8 лутбоксов (8 танков)", 
+                        3: "📦 6 лутбоксов (6 танков)",
+                        eliminated: "📦 4 лутбокса (4 танка)"
+                    },
+                    animSettings: { totalDuration: 5.0, fastRatio: 0.80, pausePhase: 3.0 }
+                },
+
+                participants: [], eliminatedList: [], winners: [], currentRoulette: null,
+                remaining: 0, state: 'idle', statusText: 'Ожидание запуска...',
+                isAnimating: false, showButton: false, ws: null,
+
+                get displayParticipants() { return this.participants.filter(p => !this.eliminatedList.find(e => e.nick === p.nick)); },
+                get rouletteParticipants() { return this.participants.filter(p => !this.eliminatedList.find(e => e.nick === p.nick) && !this.winners.includes(p.nick)); },
+
+                getSurvivalChance(player) {
+                    const active = this.rouletteParticipants;
+                    if (active.length === 0) return 0;
+                    const totalBM = active.reduce((sum, p) => sum + p.bm, 0);
+                    if (totalBM === 0) return 100 / active.length;
+                    return (player.bm / totalBM) * 100;
+                },
+
+                connectWS() {
+                    const wsUrl = `ws://${window.location.hostname}:8000/ws/raffle`;
+                    this.ws = new WebSocket(wsUrl);
+                    this.ws.onmessage = (event) => this.handleEvent(JSON.parse(event.data));
+                    this.ws.onclose = () => setTimeout(() => this.connectWS(), 3000);
+                },
+
+                handleEvent(data) {
+                    if (data.event === 'start') {
+                        this.participants = data.participants;
+                        this.remaining = data.total_count;
+                        this.eliminatedList = []; this.winners = [];
+                        this.state = 'running'; this.statusText = '🎰 РОЗЫГРЫШ НАЧАЛСЯ!';
+                        this.showButton = true; this.isAnimating = false;
+                    } 
+                    else if (data.event === 'eliminate') {
+                        this.remaining = data.remaining;
+                        this.runRouletteAnimation(data.nick);
+                    } 
+                    else if (data.event === 'place') {
+                        if (data.place === 1 && this.state === 'finished') return;
+                        this.runRouletteAnimation(data.nick, data.place, data.config_prize || this.config.prizes[data.place]);
+                    }
+                    else if (data.event === 'finish') {
+                        this.statusText = '🏆 РОЗЫГРЫШ ЗАВЕРШЁН!';
+                        this.showButton = false;
+                    }
+                    else if (data.event === 'error') {
+                        this.statusText = '❌ ' + data.message;
+                    }
+                },
+
+                requestNext() {
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.isAnimating = true;
+                        this.showButton = false;
+                        this.ws.send("next_step");
+                    }
+                },
+
+                async runRouletteAnimation(targetNick, place = null, prize = null) {
+                    const active = this.rouletteParticipants;
+                    if (active.length === 0) return;
+
+                    const totalDurationMs = this.config.animSettings.totalDuration * 1000;
+                    const fastDurationMs = totalDurationMs * this.config.animSettings.fastRatio;
+                    let startTime = Date.now();
+                    let currentDelay = 100;
+
+                    while (Date.now() - startTime < totalDurationMs - currentDelay) {
+                        const randomIndex = Math.floor(Math.random() * active.length);
+                        this.currentRoulette = active[randomIndex].nick;
+                        let elapsed = Date.now() - startTime;
+                        if (elapsed < fastDurationMs) { currentDelay = 100; } 
+                        else {
+                            let progress = (elapsed - fastDurationMs) / (totalDurationMs - fastDurationMs);
+                            currentDelay = 100 + (500 - 100) * Math.pow(progress, 2); 
+                        }
+                        await this.sleep(currentDelay);
+                    }
+
+                    this.currentRoulette = targetNick;
+                    await this.sleep(this.config.animSettings.pausePhase * 1000);
+
+                    if (place) {
+                        this.winners.push(targetNick);
+                        if (place === 3) {
+                            this.statusText = `🥉 3-е место: ${targetNick}`;
+                            this.showButton = true;
+                        } 
+                        else if (place === 2) {
+                            this.statusText = `🥈 2-е место: ${targetNick}`;
+                            const lastMan = this.rouletteParticipants[0];
+                            if (lastMan) {
+                                this.winners.push(lastMan.nick);
+                                setTimeout(() => {
+                                    this.statusText = `🥇 1-е место: ${lastMan.nick} — ЧЕМПИОН!`;
+                                    this.state = 'finished';
+                                    this.showButton = false;
+                                }, 1500);
+                            }
+                        }
+                    } else {
+                        this.statusText = `💥 Вылетает: ${targetNick}`;
+                        const eliminated = this.participants.find(p => p.nick === targetNick);
+                        if (eliminated) this.eliminatedList.unshift(eliminated);
+                        this.showButton = true;
+                        this.statusText = this.remaining > 3 ? `Осталось ${this.remaining}. Жми кнопку!` : 'Финальная тройка! Жми кнопку!';
+                    }
+
+                    this.currentRoulette = null;
+                    this.isAnimating = false;
+                },
+
+                getPlace(nick) {
+                    const idx = this.winners.indexOf(nick);
+                    if (idx === 0) return 3;
+                    if (idx === 1) return 2;
+                    if (idx === 2) return 1;
+                    return 0;
+                },
+
+                getWinnerByPlace(place) {
+                    const idx = 3 - place;
+                    if (idx >= 0 && idx < this.winners.length) {
+                        const nick = this.winners[idx];
+                        return this.participants.find(p => p.nick === nick);
+                    }
+                    return null;
+                },
+
+                getPlaceText(nick) {
+                    const place = this.getPlace(nick);
+                    if (place === 1) return '🥇 1 место';
+                    if (place === 2) return '🥈 2 место';
+                    if (place === 3) return '🥉 3 место';
+                    return '';
+                },
+
+                getPrize(nick) {
+                    const place = this.getPlace(nick);
+                    if (place === 1) return this.config.prizes[1];
+                    if (place === 2) return this.config.prizes[2];
+                    if (place === 3) return this.config.prizes[3];
+                    return '';
+                },
+
+                sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+            }
+        }
+    </script>
+</body>
+</html>

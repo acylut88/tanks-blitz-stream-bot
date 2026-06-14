@@ -10,6 +10,7 @@ from app.services.user_sync import UserSyncService
 from app.core.vk_api import VKLiveAPIClient
 from app.bot.handler import MessageHandler
 from app.api.routes import router as web_router
+from app.api.websocket import router as websocket_router
 import structlog
 
 logger = structlog.get_logger()
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Tanks Blitz Stream Bot", lifespan=lifespan)
 
 app.include_router(web_router)
+app.include_router(websocket_router)
 
 @app.get("/")
 async def root():

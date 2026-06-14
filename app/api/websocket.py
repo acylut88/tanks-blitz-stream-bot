@@ -1,5 +1,5 @@
 """
-WebSocket API для рулетки на вылет (Raffle)
+WebSocket API для рулетки на вылет (Raffle) - Пошаговый режим
 """
 import asyncio
 import random
@@ -15,8 +15,14 @@ logger = structlog.get_logger()
 
 router = APIRouter()
 
-# Хранилище активных подключений (для OBS оверлея)
 active_connections: List[WebSocket] = []
+
+# Состояние рулетки (очередь событий)
+raffle_state = {
+    "queue": [],
+    "is_active": False,
+    "participants": []
+}
 
 class ConnectionManager:
     async def connect(self, websocket: WebSocket):
@@ -27,10 +33,8 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in active_connections:
             active_connections.remove(websocket)
-        logger.info("WebSocket client disconnected")
 
     async def broadcast(self, message: dict):
-        """Отправить событие всем подключенным клиентам (OBS)"""
         for connection in active_connections:
             try:
                 await connection.send_json(message)
@@ -41,11 +45,8 @@ manager = ConnectionManager()
 
 
 class RaffleService:
-    """Логика рулетки на вылет"""
-    
     @staticmethod
     async def get_eligible_participants(session_id: int) -> List[Dict]:
-        """Получить всех участников ТЕКУЩЕЙ сессии с БМ >= 1"""
         async with async_session() as session:
             result = await session.execute(
                 select(User.nick, StreamStats.current_bm)
@@ -60,16 +61,11 @@ class RaffleService:
 
     @staticmethod
     def eliminate_one(participants: List[Dict]) -> Dict:
-        """
-        Выбрать одного на вылет.
-        Формула: Шанс вылета = 1 - (БМ_игрока / Сумма_всех_БМ)
-        """
         total_bm = sum(p["bm"] for p in participants)
-        
         weights = []
         for p in participants:
             elimination_chance = 1 - (p["bm"] / total_bm)
-            weight = max(elimination_chance, 0.01) # Защита от нулевых весов
+            weight = max(elimination_chance, 0.01)
             weights.append(weight)
         
         total_weight = sum(weights)
@@ -77,28 +73,38 @@ class RaffleService:
         
         eliminated = random.choices(participants, weights=normalized_weights, k=1)[0]
         participants.remove(eliminated)
-        
         return eliminated
+
+
+async def process_next_step():
+    """Отправить следующее событие из очереди"""
+    if raffle_state["queue"]:
+        event = raffle_state["queue"].pop(0)
+        await manager.broadcast(event)
+        
+        # Если очередь пуста, рулетка завершена
+        if not raffle_state["queue"]:
+            raffle_state["is_active"] = False
+            await manager.broadcast({"event": "finish", "message": "🏆 Розыгрыш завершен!"})
 
 
 @router.websocket("/ws/raffle")
 async def websocket_raffle_endpoint(websocket: WebSocket):
-    """Эндпоинт для подключения OBS оверлея"""
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text() # Держим соединение открытым
+            # Ждём сигнал от фронтенда "Готов к следующему шагу"
+            data = await websocket.receive_text()
+            if data == "next_step":
+                await process_next_step()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 
 async def run_raffle_process():
-    """
-    Основная функция, которую вызывает команда !розыгрыш.
-    """
+    """Подготовка и запуск рулетки"""
     async with async_session() as session:
         service = UserService(session)
-        # Берем ПОСЛЕДНЮЮ активную сессию (как мы делали в дашборде)
         result = await session.execute(
             select(StreamSession.id)
             .filter(StreamSession.ended_at.is_(None))
@@ -108,59 +114,60 @@ async def run_raffle_process():
         active_session_id = result.scalar_one_or_none()
         
         if not active_session_id:
-            logger.warning("Cannot start raffle: no active stream session")
             await manager.broadcast({"event": "error", "message": "Нет активного стрима!"})
             return
 
         participants = await RaffleService.get_eligible_participants(active_session_id)
         
         if len(participants) < 4:
-            logger.warning("Not enough participants for raffle", count=len(participants))
             await manager.broadcast({"event": "error", "message": "Недостаточно участников (минимум 4)!"})
             return
 
-        # 1. Старт
-        await manager.broadcast({
-            "event": "start",
-            "participants": participants,
-            "total_count": len(participants)
-        })
-        await asyncio.sleep(3)
-
-        # 2. Цикл вылетов до Топ-3
-        while len(participants) > 3:
-            eliminated = RaffleService.eliminate_one(participants)
-            
-            await manager.broadcast({
+        # 1. Рассчитываем ВСЮ последовательность заранее
+        steps = []
+        temp_participants = list(participants)
+        
+        # Вылеты до Топ-3
+        while len(temp_participants) > 3:
+            eliminated = RaffleService.eliminate_one(temp_participants)
+            steps.append({
                 "event": "eliminate",
                 "nick": eliminated["nick"],
                 "bm": eliminated["bm"],
-                "remaining": len(participants)
+                "remaining": len(temp_participants)
             })
-            await asyncio.sleep(2.5) # Пауза между вылетами
-
-        # 3. Финальная тройка (определяем 3, 2, 1 места)
-        third_place = RaffleService.eliminate_one(participants)
-        await manager.broadcast({
-            "event": "place", "place": 3, "nick": third_place["nick"], 
-            "bm": third_place["bm"], "prize": "1 ПА"
+        
+        # Финальная тройка - определяем 3-е место (первый вылет из тройки)
+        third_place = RaffleService.eliminate_one(temp_participants)
+        steps.append({
+            "event": "place", 
+            "place": 3, 
+            "nick": third_place["nick"], 
+            "bm": third_place["bm"], 
+            "prize": "1 ПА"
         })
-        await asyncio.sleep(3)
-
-        second_place = RaffleService.eliminate_one(participants)
-        await manager.broadcast({
-            "event": "place", "place": 2, "nick": second_place["nick"], 
-            "bm": second_place["bm"], "prize": "2 ПА"
+        
+        # Определяем 2-е место (второй вылет из тройки)
+        second_place = RaffleService.eliminate_one(temp_participants)
+        steps.append({
+            "event": "place", 
+            "place": 2, 
+            "nick": second_place["nick"], 
+            "bm": second_place["bm"], 
+            "prize": "2 ПА"
         })
-        await asyncio.sleep(3)
-
-        first_place = participants[0]
-        await manager.broadcast({
-            "event": "place", "place": 1, "nick": first_place["nick"], 
-            "bm": first_place["bm"], "prize": "2 ПА + Главный приз"
+        
+        # 1-е место (остался последний)
+        first_place = temp_participants[0]
+        steps.append({
+            "event": "place", 
+            "place": 1, 
+            "nick": first_place["nick"], 
+            "bm": first_place["bm"], 
+            "prize": "2 ПА + Главный приз"
         })
 
-        # 4. Сохраняем результаты и начисляем призы в БД
+        # 2. Сохраняем результаты в БД
         session_obj = await session.get(StreamSession, active_session_id)
         session_obj.winner_1_nick = first_place["nick"]
         session_obj.winner_2_nick = second_place["nick"]
@@ -169,8 +176,17 @@ async def run_raffle_process():
         await service.grant_premium(first_place["nick"], 2)
         await service.grant_premium(second_place["nick"], 2)
         await service.grant_premium(third_place["nick"], 1)
-        
         await session.commit()
+
+        # 3. Заполняем очередь и отправляем старт
+        raffle_state["queue"] = steps
+        raffle_state["is_active"] = True
+        raffle_state["participants"] = participants
         
-        await manager.broadcast({"event": "finish", "message": "🏆 Розыгрыш завершен!"})
-        logger.info("Raffle completed", winner1=first_place["nick"])
+        await manager.broadcast({
+            "event": "start",
+            "participants": participants,
+            "total_count": len(participants)
+        })
+        
+        logger.info("Raffle prepared and started", steps_count=len(steps))
