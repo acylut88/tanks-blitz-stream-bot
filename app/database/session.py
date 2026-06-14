@@ -1,8 +1,9 @@
 """
 Настройка асинхронной сессии SQLAlchemy
 """
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.config import settings
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from typing import AsyncGenerator
 
 # Создание асинхронного движка
 engine = create_async_engine(
@@ -19,7 +20,7 @@ async_session = async_sessionmaker(
 )
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Получить сессию БД (для использования в зависимостях FastAPI)"""
     async with async_session() as session:
         try:
