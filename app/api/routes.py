@@ -9,10 +9,12 @@ from app.api.websocket import run_raffle_process
 from app.config import settings
 from app.database.models import User, StreamStats, StreamSession
 from app.database.session import async_session
+from app.services.settings_service import SettingsService
 from app.services.user_service import UserService
 from sqlalchemy import select, func, desc, distinct
 import asyncio
 import structlog
+
 
 logger = structlog.get_logger()
 
@@ -196,3 +198,177 @@ async def update_delay_api(request: dict):
         dispatcher.send_delay = new_delay
         logger.info("Dispatcher delay updated", delay=new_delay)
     return {"message": f"Задержка изменена на {new_delay} сек"}
+
+
+# --- API для настроек ---
+@router.get("/api/admin/settings")
+async def get_all_settings_api(category: str = None):
+    """Получить все настройки или по категории"""
+    settings = await SettingsService.get_all_settings(category)
+    return {"settings": settings}
+
+@router.get("/api/admin/settings/{key}")
+async def get_setting_api(key: str):
+    """Получить одну настройку"""
+    value = await SettingsService.get_setting(key)
+    if value is None:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    return {"key": key, "value": value}
+
+@router.patch("/api/admin/settings/{key}")
+async def update_setting_api(key: str, request: dict):
+    """Обновить настройку"""
+    value = request.get("value")
+    description = request.get("description")
+    category = request.get("category")
+    
+    if value is None:
+        raise HTTPException(status_code=400, detail="Value is required")
+    
+    # 🔥 Добавим логирование
+    logger.info(f"Updating setting: key={key}, value={value}")
+    
+    await SettingsService.set_setting(key, value, description, category)
+    
+    # 🔥 Проверяем, что сохранилось
+    saved_value = await SettingsService.get_setting(key)
+    logger.info(f"Saved value: {saved_value}")
+    
+    return {"message": f"Setting '{key}' updated", "value": value}
+
+@router.post("/api/admin/settings/initialize")
+async def initialize_defaults_api():
+    """Инициализировать настройки по умолчанию"""
+    await SettingsService.initialize_defaults()
+    return {"message": "Default settings initialized"}
+
+# --- API для пользователей ---
+@router.get("/api/admin/users")
+async def get_all_users_api():
+    """Получить список всех пользователей с корректным расчётом БМ"""
+    async with async_session() as session:
+        # Получить активную сессию
+        active_session_result = await session.execute(
+            select(StreamSession.id)
+            .filter(StreamSession.ended_at.is_(None))
+            .order_by(StreamSession.started_at.desc())
+            .limit(1)
+        )
+        active_session = active_session_result.scalar_one_or_none()
+        
+        # Получить всех пользователей
+        result = await session.execute(
+            select(User).order_by(User.last_seen.desc())
+        )
+        users = result.scalars().all()
+        
+        users_data = []
+        for user in users:
+            # БМ за текущий стрим
+            stream_bm = 0
+            if active_session:
+                stream_stats_result = await session.execute(
+                    select(StreamStats.current_bm)
+                    .filter(
+                        StreamStats.user_id == user.id,
+                        StreamStats.session_id == active_session
+                    )
+                )
+                stats = stream_stats_result.scalar_one_or_none()
+                stream_bm = stats if stats else 0
+            
+            # БМ за ВСЁ время = БМ за все прошлые стримы + БМ за текущий стрим
+            # Для этого нужно получить все завершённые сессии пользователя
+            all_sessions_result = await session.execute(
+                select(func.sum(StreamStats.current_bm))
+                .filter(
+                    StreamStats.user_id == user.id,
+                    StreamStats.session_id != active_session if active_session else True
+                )
+            )
+            past_bm = all_sessions_result.scalar() or 0
+            
+            # Итоговая БМ за всё время
+            total_lifetime_bm = past_bm + stream_bm
+            
+            users_data.append({
+                "id": user.id,
+                "nick": user.nick,
+                "vk_id": user.vk_id,
+                "premium_streams_left": user.premium_streams_left,
+                "lifetime_streams_with_premium": user.lifetime_streams_with_premium,
+                "lifetime_boxes_opened": user.lifetime_boxes_opened,
+                "lifetime_tanks_lt": user.lifetime_tanks_lt,
+                "lifetime_tanks_st": user.lifetime_tanks_st,
+                "lifetime_tanks_tt": user.lifetime_tanks_tt,
+                "lifetime_tanks_pt": user.lifetime_tanks_pt,
+                "first_seen": user.first_seen.isoformat() if user.first_seen else None,
+                "last_seen": user.last_seen.isoformat() if user.last_seen else None,
+                "stream_bm": stream_bm,
+                "lifetime_bm": total_lifetime_bm,  # Теперь включает и текущий стрим
+            })
+        
+        return users_data
+
+@router.patch("/api/admin/users/{user_id}")
+async def update_user_api(user_id: int, request: dict):
+    """Обновить данные пользователя"""
+    async with async_session() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Обновляем только разрешённые поля
+        allowed_fields = [
+            "premium_streams_left",
+            "lifetime_tanks_lt",
+            "lifetime_tanks_st",
+            "lifetime_tanks_tt",
+            "lifetime_tanks_pt",
+            "lifetime_boxes_opened",
+        ]
+        
+        for field in allowed_fields:
+            if field in request:
+                setattr(user, field, request[field])
+        
+        await session.commit()
+        logger.info("User updated via API", user_id=user_id, nick=user.nick)
+        return {"message": f"Пользователь {user.nick} обновлён"}
+    
+@router.post("/api/admin/users/{user_id}/add-tanks")
+async def add_tanks_to_user(user_id: int, request: dict):
+    """Добавить танки пользователю (для тестирования)"""
+    tank_type = request.get("tank_type")  # "lt", "st", "tt", "pt"
+    count = request.get("count", 1)
+    
+    async with async_session() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Добавляем танки
+        if tank_type == "lt":
+            user.lifetime_tanks_lt += count
+        elif tank_type == "st":
+            user.lifetime_tanks_st += count
+        elif tank_type == "tt":
+            user.lifetime_tanks_tt += count
+        elif tank_type == "pt":
+            user.lifetime_tanks_pt += count
+        else:
+            raise HTTPException(status_code=400, detail="Invalid tank type")
+        
+        # Пересчитываем БМ
+        total_bm = (user.lifetime_tanks_lt * 1 + 
+                   user.lifetime_tanks_st * 2 + 
+                   user.lifetime_tanks_tt * 3 + 
+                   user.lifetime_tanks_pt * 4)
+        
+        await session.commit()
+        
+        logger.info(f"Added {count} {tank_type} tanks to user {user.nick}")
+        return {
+            "message": f"Добавлено {count} {tank_type.upper()} танков",
+            "total_bm": total_bm
+        }

@@ -116,6 +116,12 @@ class MessageHandler:
                 user.lifetime_tanks_tt += loot.get(TankType.TT, 0)
                 user.lifetime_tanks_pt += loot.get(TankType.PT, 0)
                 
+                # Если это 12-я активация — выдаём ПА
+                if current_activation == 12:
+                    user.premium_streams_left += 1
+                    user.lifetime_streams_with_premium += 1
+                    logger.info("PA token granted for 12 activations", nick=nick)
+                
                 # Коммитим изменения в БД
                 await session.commit()
                 

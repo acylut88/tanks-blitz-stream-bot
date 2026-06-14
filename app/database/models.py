@@ -2,7 +2,7 @@
 SQLAlchemy модели данных
 """
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -93,3 +93,16 @@ class ProcessedMessage(Base):
     
     def __repr__(self):
         return f"<ProcessedMessage(msg_id={self.msg_id})>"
+    
+class Setting(Base):
+    """Хранилище настроек (key-value store)"""
+    __tablename__ = "settings"
+    
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=False)  # Храним как JSON строку
+    description = Column(String(255), nullable=True)
+    category = Column(String(50), nullable=True)  # 'raffle', 'dispatcher', 'general'
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    def __repr__(self):
+        return f"<Setting(key={self.key}, value={self.value})>"

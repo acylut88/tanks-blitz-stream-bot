@@ -6,56 +6,493 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body class="bg-gray-900 text-white p-8" x-data="adminData()">
-    <div class="max-w-4xl mx-auto">
+<body class="bg-gray-900 text-white p-8" x-data="adminData()" x-init="init()">
+    <div class="max-w-6xl mx-auto">
         <div class="flex justify-between items-center mb-8">
             <h1 class="text-3xl font-bold text-red-500">⚙️ Админ-панель</h1>
             <a href="/logout" class="text-sm text-gray-400 hover:text-white">Выйти</a>
         </div>
 
-        <!-- Начисление ПА -->
-        <div class="bg-gray-800 p-6 rounded-lg mb-6">
-            <h2 class="text-xl font-bold mb-4">🎖 Начислить Офицерский Штаб (ПА)</h2>
-            <div class="flex gap-4">
-                <input type="text" x-model="nick" placeholder="Ник зрителя" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600">
-                <input type="number" x-model="streams" placeholder="Кол-во стримов" class="w-32 p-2 rounded bg-gray-700 border border-gray-600">
-                <button @click="grantPA()" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-2 rounded font-bold">Начислить</button>
-            </div>
-            <p x-show="msg" x-text="msg" class="mt-2 text-green-400"></p>
+        <!-- Уведомление -->
+        <div x-show="notification" x-transition class="fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+            <span x-text="notification"></span>
         </div>
 
-        <!-- Настройка диспетчера -->
-        <div class="bg-gray-800 p-6 rounded-lg">
-            <h2 class="text-xl font-bold mb-4">⚡ Задержка отправки сообщений</h2>
-            <div class="flex items-center gap-4">
-                <input type="range" min="0.1" max="2.0" step="0.1" x-model="delay" @input="updateDelay()" class="flex-1">
-                <span class="text-xl font-mono w-16 text-right" x-text="delay + ' сек'"></span>
+        <!-- Вкладки -->
+        <div class="flex gap-2 mb-6 border-b border-gray-700">
+            <button @click="activeTab = 'users'" :class="{'border-yellow-500 text-yellow-500': activeTab === 'users'}" class="px-4 py-2 border-b-2 border-transparent hover:border-gray-500 transition"> Пользователи</button>
+            <button @click="activeTab = 'settings'" :class="{'border-yellow-500 text-yellow-500': activeTab === 'settings'}" class="px-4 py-2 border-b-2 border-transparent hover:border-gray-500 transition">🔧 Настройки</button>
+            <button @click="activeTab = 'premium'" :class="{'border-yellow-500 text-yellow-500': activeTab === 'premium'}" class="px-4 py-2 border-b-2 border-transparent hover:border-gray-500 transition">🎖 Начислить ПА</button>
+        </div>
+        <!-- Управление автообновлением -->
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">👥 Управление пользователями</h2>
+            <button @click="toggleAutoRefresh" 
+                    :class="autoRefreshInterval ? 'bg-green-600' : 'bg-gray-600'"
+                    class="px-4 py-2 rounded font-bold transition flex items-center gap-2">
+                <span x-show="autoRefreshInterval">⏸️ Пауза</span>
+                <span x-show="!autoRefreshInterval">▶️ Автообновление</span>
+                <span class="text-xs opacity-75">(5 сек)</span>
+            </button>
+        </div>
+
+        <div x-show="autoRefreshInterval" class="text-xs text-green-400 mb-2">
+            🔄 Автообновление активно
+        </div>
+        <!-- Вкладка: Пользователи -->
+        <div x-show="activeTab === 'users'" class="bg-gray-800 p-6 rounded-lg">
+            <h2 class="text-xl font-bold mb-4"> Управление пользователями</h2>
+            <div class="mb-4">
+                <input type="text" x-model="searchNick" placeholder=" Поиск по нику..." class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <!-- 🔥 ИТОГОВАЯ СТРОКА -->
+                    <tfoot class="bg-gray-700 font-bold">
+                        <tr>
+                            <td class="p-3 text-yellow-400">📊 ИТОГО:</td>
+                            <td class="p-3 text-green-400 font-mono" x-text="totalStreamBM"></td>
+                            <td class="p-3 text-blue-400 font-mono" x-text="totalLifetimeBM"></td>
+                            <td class="p-3" x-text="totalBoxes"></td>
+                            <td class="p-3 text-yellow-400" x-text="totalPA"></td>
+                            <td class="p-3"></td>
+                        </tr>
+                    </tfoot>
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th class="p-3">Ник</th>
+                            <th class="p-3 text-green-400">📊 БМ (стрим)</th>
+                            <th class="p-3 text-blue-400">📈 БМ (всё время)</th>
+                            <th class="p-3">Ящики</th>
+                            <th class="p-3">ПА</th>
+                            <th class="p-3">Действия</th>
+                        </tr>
+                        
+                    </thead>
+                    <tbody>
+                        <template x-for="user in filteredUsers" :key="user.id">
+                            <tr class="border-b border-gray-700 hover:bg-gray-750">
+                                <td class="p-3 font-bold" x-text="user.nick"></td>
+                                <td class="p-3 text-green-400 font-mono" x-text="user.stream_bm"></td>
+                                <td class="p-3 text-blue-400 font-mono" x-text="user.lifetime_bm"></td>
+                                <td class="p-3" x-text="user.lifetime_boxes_opened"></td>
+                                <td class="p-3 text-yellow-400" x-text="user.premium_streams_left"></td>
+                                <td class="p-3">
+                                    <button @click="editUser(user)" class="text-blue-400 hover:text-blue-300 mr-2">✏️ Редактировать</button>
+                                    <button @click="addTanks(user)" class="text-green-400 hover:text-green-300">🎁 Добавить танки</button>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr x-show="filteredUsers.length === 0">
+                            <td colspan="6" class="p-6 text-center text-gray-500">Пользователи не найдены</td>
+                        </tr>
+                    </tbody>
+                    
+                </table>
+            </div>
+            <div class="mt-4 text-sm text-gray-400">
+                Всего пользователей: <span class="text-white font-bold" x-text="users.length"></span>
+            </div>
+        </div>
+
+        <!-- Вкладка: Настройки -->
+        <div x-show="activeTab === 'settings'" class="space-y-6">
+            <!-- Настройки рулетки -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-yellow-500">🎰 Настройки рулетки</h2>
+                    <button @click="saveRaffleSettings()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded transition">💾 Сохранить</button>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Время анимации (секунды)</label>
+                        <input type="number" step="0.1" x-model.number="settings['raffle.animSettings.totalDuration']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Общая длительность анимации рулетки</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Доля быстрого вращения</label>
+                        <input type="number" step="0.01" min="0" max="1" x-model.number="settings['raffle.animSettings.fastRatio']" placeholder="0.00 - 1.00" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">От 0.00 до 1.00 (0% - 100%). Например: 0.80 = 80% быстрой фазы</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Пауза после выбора (секунды)</label>
+                        <input type="number" step="0.1" x-model.number="settings['raffle.animSettings.pausePhase']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Сколько секунд показывать результат перед следующим шагом</p>
+                    </div>
+                </div>
+
+                <h3 class="text-lg font-bold mb-2 text-gray-400 mt-6">🎁 Призы</h3>
+                <div class="space-y-2">
+                    <div class="flex gap-2 items-center">
+                        <label class="w-32 font-bold text-yellow-400">1 место:</label>
+                        <input type="text" x-model="settings['raffle.prizes.1']" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <label class="w-32 font-bold text-gray-300">2 место:</label>
+                        <input type="text" x-model="settings['raffle.prizes.2']" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <label class="w-32 font-bold text-orange-400">3 место:</label>
+                        <input type="text" x-model="settings['raffle.prizes.3']" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <label class="w-32 font-bold text-gray-400">Выбывшие:</label>
+                        <input type="text" x-model="settings['raffle.prizes.eliminated']" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                </div>
+                <h3 class="text-lg font-bold mb-2 text-green-400 mt-6">💰 Начисления (числа)</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Лутбоксов за 1 место</label>
+                        <input type="number" x-model.number="settings['raffle.boxes.1']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Лутбоксов за 2 место</label>
+                        <input type="number" x-model.number="settings['raffle.boxes.2']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Лутбоксов за 3 место</label>
+                        <input type="number" x-model.number="settings['raffle.boxes.3']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Лутбоксов для выбывших</label>
+                        <input type="number" x-model.number="settings['raffle.boxes.eliminated']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">ПА за 1 место</label>
+                        <input type="number" x-model.number="settings['raffle.pa.1']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">ПА за 2 место</label>
+                        <input type="number" x-model.number="settings['raffle.pa.2']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">ПА за 3 место</label>
+                        <input type="number" x-model.number="settings['raffle.pa.3']" class="w-full p-2 rounded bg-gray-700 border border-gray-600">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Настройки диспетчера -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-blue-500">⚡ Настройки диспетчера</h2>
+                    <button @click="saveDispatcherSettings()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded transition">💾 Сохранить</button>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Задержка отправки (секунды)</label>
+                        <input type="number" step="0.1" x-model.number="settings['dispatcher.send_delay']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Пауза между отправкой сообщений в ЛС</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Порог перегрузки</label>
+                        <input type="number" x-model.number="settings['dispatcher.overload_threshold']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Максимальное количество сообщений в очереди</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Кнопка сброса -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <button @click="initializeDefaults()" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-6 rounded transition">🔄 Сбросить настройки по умолчанию</button>
+            </div>
+        </div>
+
+        <!-- Вкладка: Начислить ПА -->
+        <div x-show="activeTab === 'premium'" class="bg-gray-800 p-6 rounded-lg">
+            <h2 class="text-xl font-bold mb-4">🎖 Начислить Офицерский Штаб (ПА)</h2>
+            <div class="flex gap-4 mb-4">
+                <input type="text" x-model="nick" placeholder="Ник зрителя" class="flex-1 p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                <input type="number" x-model.number="streams" placeholder="Кол-во стримов" min="1" class="w-32 p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                <button @click="grantPA()" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-2 rounded font-bold transition">Начислить</button>
+            </div>
+            <p x-show="msg" x-text="msg" class="text-green-400"></p>
+        </div>
+
+        <!-- Модальное окно редактирования пользователя -->
+        <div x-show="editingUser" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" @click.self="editingUser = null">
+            <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full border-2 border-yellow-500">
+                <h3 class="text-xl font-bold mb-4">✏️ Редактировать: <span class="text-yellow-400" x-text="editingUser?.nick"></span></h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm mb-1 text-yellow-400">🎖 ПА жетоны</label>
+                        <input type="number" x-model.number="editingUser.premium_streams_left" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1 text-green-400">🟢 ЛТ (×1 БМ)</label>
+                        <input type="number" x-model.number="editingUser.lifetime_tanks_lt" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1 text-blue-400">🔵 СТ (×2 БМ)</label>
+                        <input type="number" x-model.number="editingUser.lifetime_tanks_st" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1 text-purple-400">🟣 ТТ (×3 БМ)</label>
+                        <input type="number" x-model.number="editingUser.lifetime_tanks_tt" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1 text-orange-400">🟠 ПТ (×4 БМ)</label>
+                        <input type="number" x-model.number="editingUser.lifetime_tanks_pt" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1 text-gray-400">📦 Всего ящиков открыто</label>
+                        <input type="number" x-model.number="editingUser.lifetime_boxes_opened" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-yellow-500 focus:outline-none">
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-6">
+                    <button @click="saveUser()" class="flex-1 bg-green-600 hover:bg-green-500 py-2 rounded font-bold transition">💾 Сохранить</button>
+                    <button @click="editingUser = null" class="flex-1 bg-gray-600 hover:bg-gray-500 py-2 rounded font-bold transition">Отмена</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        
         function adminData() {
             return {
-                nick: '', streams: 1, delay: 0.4, msg: '',
+                activeTab: 'settings',
+                users: [],
+                searchNick: '',
+                nick: '',
+                streams: 1,
+                msg: '',
+                notification: '',
+                settings: {
+                    'raffle.animSettings.totalDuration': 10.0,
+                    'raffle.animSettings.fastRatio': 0.80,
+                    'raffle.animSettings.pausePhase': 3.0,
+                    'raffle.prizes.1': '📦 10 лутбоксов (10 танков)',
+                    'raffle.prizes.2': '📦 8 лутбоксов (8 танков)',
+                    'raffle.prizes.3': '📦 6 лутбоксов (6 танков)',
+                    'raffle.prizes.eliminated': ' 4 лутбокса (4 танка)',
+                    'dispatcher.send_delay': 0.4,
+                    'dispatcher.overload_threshold': 50
+                },
+                editingUser: null,
+                autoRefreshInterval: null,  // Для автообновления
+
+                async init() {
+                    await this.loadUsers();
+                    await this.loadSettings();
+                    
+                    // 🔥 Запускаем автообновление каждые 5 секунд
+                    this.startAutoRefresh();
+                },
+
+                startAutoRefresh() {
+                    // Очищаем предыдущий интервал если есть
+                    if (this.autoRefreshInterval) {
+                        clearInterval(this.autoRefreshInterval);
+                    }
+                    
+                    // Обновляем данные каждые 5 секунд
+                    this.autoRefreshInterval = setInterval(async () => {
+                        if (this.activeTab === 'users') {
+                            await this.loadUsers();
+                        } else if (this.activeTab === 'settings') {
+                            await this.loadSettings();
+                        }
+                    }, 5000);
+                },
+
+                stopAutoRefresh() {
+                    if (this.autoRefreshInterval) {
+                        clearInterval(this.autoRefreshInterval);
+                        this.autoRefreshInterval = null;
+                    }
+                },
+
+                get filteredUsers() {
+                    if (!this.searchNick) return this.users;
+                    return this.users.filter(u => u.nick.toLowerCase().includes(this.searchNick.toLowerCase()));
+                },
+
+                calculateBM(user) {
+                    return user.lifetime_tanks_lt * 1 + 
+                           user.lifetime_tanks_st * 2 + 
+                           user.lifetime_tanks_tt * 3 + 
+                           user.lifetime_tanks_pt * 4;
+                },
+
+                showNotification(text) {
+                    this.notification = text;
+                    setTimeout(() => this.notification = '', 3000);
+                },
+
+                async init() {
+                    await this.loadUsers();
+                    await this.loadSettings();
+                },
+
+                async loadUsers() {
+                    try {
+                        const res = await fetch('/api/admin/users');
+                        if (res.ok) {
+                            this.users = await res.json();
+                        } else {
+                            console.error('Failed to load users:', res.status);
+                        }
+                    } catch (e) {
+                        console.error('Error loading users:', e);
+                    }
+                },
+
+                async loadSettings() {
+                    try {
+                        const res = await fetch('/api/admin/settings');  // 🔥 Без category?
+                        if (res.ok) {
+                            const data = await res.json();
+                            // Merge with defaults
+                            this.settings = {...this.settings, ...data.settings};
+                            console.log('Settings loaded:', this.settings);  // 🔥 Добавь для отладки
+                        } else {
+                            console.error('Failed to load settings:', res.status);
+                        }
+                    } catch (e) {
+                        console.error('Error loading settings:', e);
+                    }
+                },
+
+                async saveRaffleSettings() {
+                    const keys = [
+                        'raffle.animSettings.totalDuration',
+                        'raffle.animSettings.fastRatio',
+                        'raffle.animSettings.pausePhase',
+                        'raffle.prizes.1',
+                        'raffle.prizes.2',
+                        'raffle.prizes.3',
+                        'raffle.prizes.eliminated',
+                        'raffle.boxes.1',      
+                        'raffle.boxes.2',      
+                        'raffle.boxes.3',      
+                        'raffle.boxes.eliminated',  
+                        'raffle.pa.1',         
+                        'raffle.pa.2',         
+                        'raffle.pa.3'          
+                    ];
+                    
+                    for (const key of keys) {
+                        await fetch(`/api/admin/settings/${key}`, {
+                            method: 'PATCH',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({value: this.settings[key]})
+                        });
+                    }
+                    
+                    this.showNotification('✅ Настройки рулетки сохранены!');
+                },
+
+                async saveDispatcherSettings() {
+                    const keys = [
+                        'dispatcher.send_delay',
+                        'dispatcher.overload_threshold'
+                    ];
+                    
+                    for (const key of keys) {
+                        await fetch(`/api/admin/settings/${key}`, {
+                            method: 'PATCH',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({value: this.settings[key]})
+                        });
+                    }
+                    
+                    this.showNotification('✅ Настройки диспетчера сохранены!');
+                },
+
                 async grantPA() {
+                    if (!this.nick) {
+                        this.msg = '⚠️ Введите ник!';
+                        return;
+                    }
+                    
                     const res = await fetch('/api/admin/grant-premium', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ nick: this.nick, streams: parseInt(this.streams) })
+                        body: JSON.stringify({nick: this.nick, streams: this.streams})
                     });
+                    
                     const data = await res.json();
-                    this.msg = data.message;
+                    this.msg = data.message || data.detail;
                     this.nick = '';
+                    await this.loadUsers();
                     setTimeout(() => this.msg = '', 3000);
                 },
-                async updateDelay() {
-                    await fetch('/api/admin/dispatcher-delay', {
+
+                async initializeDefaults() {
+                    if (confirm('Сбросить все настройки к значениям по умолчанию?')) {
+                        await fetch('/api/admin/settings/initialize', {method: 'POST'});
+                        await this.loadSettings();
+                        this.showNotification('🔄 Настройки сброшены!');
+                    }
+                },
+
+                editUser(user) {
+                    this.editingUser = {...user};
+                },
+
+                async saveUser() {
+                    const res = await fetch(`/api/admin/users/${this.editingUser.id}`, {
                         method: 'PATCH',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ delay: parseFloat(this.delay) })
+                        body: JSON.stringify(this.editingUser)
                     });
-                }
+                    
+                    const data = await res.json();
+                    this.showNotification(data.message || '✅ Пользователь обновлён!');
+                    this.editingUser = null;
+                    await this.loadUsers();
+                },
+
+                async addTanks(user) {
+                    const tankType = prompt(`Введите тип танка (lt/st/tt/pt) для ${user.nick}:`, 'lt');
+                    if (!tankType) return;
+                    
+                    const count = prompt('Количество:', '5');
+                    if (!count) return;
+                    
+                    const res = await fetch(`/api/admin/users/${user.id}/add-tanks`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({tank_type: tankType, count: parseInt(count)})
+                    });
+                    
+                    const data = await res.json();
+                    if (res.ok) {
+                        this.showNotification(`✅ ${data.message}. БМ: ${data.total_bm}`);
+                        await this.loadUsers();
+                    } else {
+                        this.showNotification(`❌ Ошибка: ${data.detail}`);
+                    }
+                },
+
+                toggleAutoRefresh() {
+                    if (this.autoRefreshInterval) {
+                        this.stopAutoRefresh();
+                        this.showNotification('⏸️ Автообновление остановлено');
+                    } else {
+                        this.startAutoRefresh();
+                        this.showNotification('▶️ Автообновление включено (каждые 5 сек)');
+                    }
+                },
+
+                get totalStreamBM() {
+                    return this.users.reduce((sum, u) => sum + (u.stream_bm || 0), 0);
+                },
+
+                get totalLifetimeBM() {
+                    return this.users.reduce((sum, u) => sum + (u.lifetime_bm || 0), 0);
+                },
+
+                get totalBoxes() {
+                    return this.users.reduce((sum, u) => sum + (u.lifetime_boxes_opened || 0), 0);
+                },
+
+                get totalPA() {
+                    return this.users.reduce((sum, u) => sum + (u.premium_streams_left || 0), 0);
+                },
             }
         }
     </script>

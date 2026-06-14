@@ -48,7 +48,7 @@
         }
     </style>
 </head>
-<body class="text-white p-4 w-full h-screen" x-data="raffleData()" x-init="connectWS()">
+<body class="text-white p-4 w-full h-screen" x-data="raffleData()" x-init="connectWS(); loadSettings()">
     
     <!-- СТАТУС-БАР -->
     <div class="fixed top-4 left-1/2 transform -translate-x-1/2 bg-black/90 px-8 py-3 rounded-xl border-2 border-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.5)] z-50 text-center min-w-[400px]">
@@ -57,11 +57,16 @@
             В строю: <span class="text-white font-black" x-text="displayParticipants.length"></span> командиров
         </div>
     </div>
-
-    <!-- КНОПКА ИНФОРМАЦИИ (всегда видна) -->
+    <!-- Кнопка информации -->
     <button @click="showInfo = true" 
             class="fixed top-4 right-4 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg border-2 border-blue-400 shadow-lg z-50 transition transform hover:scale-105">
         ℹ️ Правила
+    </button>
+
+    <!-- Кнопка обновления настроек -->
+    <button @click="refreshSettings()" 
+            class="fixed top-4 right-56 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-4 rounded-lg border-2 border-purple-400 shadow-lg z-50 transition transform hover:scale-105">
+        🔄 Настройки
     </button>
 
     <!-- МОДАЛЬНОЕ ОКНО С ИНФОРМАЦИЕЙ -->
@@ -305,7 +310,7 @@
     <script>
         function raffleData() {
             return {
-                showInfo: false, // Управление модальным окном
+                showInfo: false,
                 config: {
                     prizes: { 
                         1: "📦 10 лутбоксов (10 танков)", 
@@ -313,7 +318,7 @@
                         3: "📦 6 лутбоксов (6 танков)",
                         eliminated: "📦 4 лутбокса (4 танка)"
                     },
-                    animSettings: { totalDuration: 5.0, fastRatio: 0.80, pausePhase: 3.0 }
+                    animSettings: { totalDuration: 10.0, fastRatio: 0.80, pausePhase: 3.0 }
                 },
 
                 participants: [], eliminatedList: [], winners: [], currentRoulette: null,
@@ -336,6 +341,33 @@
                     this.ws = new WebSocket(wsUrl);
                     this.ws.onmessage = (event) => this.handleEvent(JSON.parse(event.data));
                     this.ws.onclose = () => setTimeout(() => this.connectWS(), 3000);
+                },
+                
+                async loadSettings() {
+                    try {
+                        const res = await fetch('/api/admin/settings?category=raffle');
+                        const data = await res.json();
+                        const settings = data.settings;
+                        
+                        // Применяем настройки рулетки
+                        if (settings['raffle.animSettings.totalDuration']) {
+                            this.config.animSettings.totalDuration = settings['raffle.animSettings.totalDuration'];
+                        }
+                        if (settings['raffle.animSettings.fastRatio']) {
+                            this.config.animSettings.fastRatio = settings['raffle.animSettings.fastRatio'];
+                        }
+                        if (settings['raffle.animSettings.pausePhase']) {
+                            this.config.animSettings.pausePhase = settings['raffle.animSettings.pausePhase'];
+                        }
+                        if (settings['raffle.prizes.1']) this.config.prizes[1] = settings['raffle.prizes.1'];
+                        if (settings['raffle.prizes.2']) this.config.prizes[2] = settings['raffle.prizes.2'];
+                        if (settings['raffle.prizes.3']) this.config.prizes[3] = settings['raffle.prizes.3'];
+                        if (settings['raffle.prizes.eliminated']) this.config.prizes.eliminated = settings['raffle.prizes.eliminated'];
+                        
+                        console.log('Settings loaded from server:', this.config);
+                    } catch (e) {
+                        console.error('Failed to load settings:', e);
+                    }
                 },
 
                 handleEvent(data) {
@@ -458,7 +490,47 @@
                     return '';
                 },
 
-                sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+                sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
+
+                async refreshSettings() {
+                    try {
+                        const res = await fetch('/api/admin/settings?category=raffle');
+                        const data = await res.json();
+                        const settings = data.settings;
+                        
+                        // Применяем настройки рулетки
+                        if (settings['raffle.animSettings.totalDuration']) {
+                            this.config.animSettings.totalDuration = settings['raffle.animSettings.totalDuration'];
+                        }
+                        if (settings['raffle.animSettings.fastRatio']) {
+                            this.config.animSettings.fastRatio = settings['raffle.animSettings.fastRatio'];
+                        }
+                        if (settings['raffle.animSettings.pausePhase']) {
+                            this.config.animSettings.pausePhase = settings['raffle.animSettings.pausePhase'];
+                        }
+                        if (settings['raffle.prizes.1']) this.config.prizes[1] = settings['raffle.prizes.1'];
+                        if (settings['raffle.prizes.2']) this.config.prizes[2] = settings['raffle.prizes.2'];
+                        if (settings['raffle.prizes.3']) this.config.prizes[3] = settings['raffle.prizes.3'];
+                        if (settings['raffle.prizes.eliminated']) this.config.prizes.eliminated = settings['raffle.prizes.eliminated'];
+                        
+                        // Показываем уведомление
+                        this.showNotification('✅ Настройки обновлены! Время: ' + this.config.animSettings.totalDuration + ' сек');
+                        
+                        console.log('Settings refreshed:', this.config);
+                    } catch (e) {
+                        console.error('Failed to refresh settings:', e);
+                        this.showNotification('❌ Ошибка обновления настроек');
+                    }
+                },
+
+                showNotification(text) {
+                    // Создаём временное уведомление
+                    const notif = document.createElement('div');
+                    notif.className = 'fixed top-20 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+                    notif.textContent = text;
+                    document.body.appendChild(notif);
+                    setTimeout(() => notif.remove(), 3000);
+                }
             }
         }
     </script>

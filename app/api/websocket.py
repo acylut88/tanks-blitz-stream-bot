@@ -93,18 +93,39 @@ async def websocket_raffle_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Ждём сигнал от фронтенда "Готов к следующему шагу"
             data = await websocket.receive_text()
             if data == "next_step":
                 await process_next_step()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+        logger.info("WebSocket client disconnected normally")
+    except ConnectionResetError:
+        # Клиент закрыл соединение (обновил страницу)
+        manager.disconnect(websocket)
+        logger.info("WebSocket connection reset by client (page refresh)")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 
 async def run_raffle_process():
     """Подготовка и запуск рулетки"""
+    from app.services.settings_service import SettingsService
+    
     async with async_session() as session:
         service = UserService(session)
+        
+        # 🔥 Читаем настройки призов из БД
+        boxes_1 = await SettingsService.get_setting("raffle.boxes.1", 10)
+        boxes_2 = await SettingsService.get_setting("raffle.boxes.2", 8)
+        boxes_3 = await SettingsService.get_setting("raffle.boxes.3", 6)
+        boxes_eliminated = await SettingsService.get_setting("raffle.prizes.eliminated", 4)
+        
+        pa_1 = await SettingsService.get_setting("raffle.pa.1", 1)
+        pa_2 = await SettingsService.get_setting("raffle.pa.2", 1)
+        pa_3 = await SettingsService.get_setting("raffle.pa.3", 1)
+        
+        # 1. Получаем активную сессию
         result = await session.execute(
             select(StreamSession.id)
             .filter(StreamSession.ended_at.is_(None))
@@ -117,17 +138,17 @@ async def run_raffle_process():
             await manager.broadcast({"event": "error", "message": "Нет активного стрима!"})
             return
 
+        # 2. Получаем участников
         participants = await RaffleService.get_eligible_participants(active_session_id)
         
         if len(participants) < 4:
             await manager.broadcast({"event": "error", "message": "Недостаточно участников (минимум 4)!"})
             return
 
-        # 1. Рассчитываем ВСЮ последовательность заранее
+        # 3. Рассчитываем последовательность
         steps = []
         temp_participants = list(participants)
         
-        # Вылеты до Топ-3
         while len(temp_participants) > 3:
             eliminated = RaffleService.eliminate_one(temp_participants)
             steps.append({
@@ -137,48 +158,68 @@ async def run_raffle_process():
                 "remaining": len(temp_participants)
             })
         
-        # Финальная тройка - определяем 3-е место (первый вылет из тройки)
         third_place = RaffleService.eliminate_one(temp_participants)
         steps.append({
-            "event": "place", 
-            "place": 3, 
-            "nick": third_place["nick"], 
-            "bm": third_place["bm"], 
-            "prize": "1 ПА"
+            "event": "place", "place": 3, 
+            "nick": third_place["nick"], "bm": third_place["bm"], 
+            "prize": f"{boxes_3} лутбоксов + {pa_3} ПА"
         })
         
-        # Определяем 2-е место (второй вылет из тройки)
         second_place = RaffleService.eliminate_one(temp_participants)
         steps.append({
-            "event": "place", 
-            "place": 2, 
-            "nick": second_place["nick"], 
-            "bm": second_place["bm"], 
-            "prize": "2 ПА"
+            "event": "place", "place": 2, 
+            "nick": second_place["nick"], "bm": second_place["bm"], 
+            "prize": f"{boxes_2} лутбоксов + {pa_2} ПА"
         })
         
-        # 1-е место (остался последний)
         first_place = temp_participants[0]
         steps.append({
-            "event": "place", 
-            "place": 1, 
-            "nick": first_place["nick"], 
-            "bm": first_place["bm"], 
-            "prize": "2 ПА + Главный приз"
+            "event": "place", "place": 1, 
+            "nick": first_place["nick"], "bm": first_place["bm"], 
+            "prize": f"{boxes_1} лутбоксов + {pa_1} ПА"
         })
 
-        # 2. Сохраняем результаты в БД
+        # 4. Сохраняем результаты
         session_obj = await session.get(StreamSession, active_session_id)
         session_obj.winner_1_nick = first_place["nick"]
         session_obj.winner_2_nick = second_place["nick"]
         session_obj.winner_3_nick = third_place["nick"]
         
-        await service.grant_premium(first_place["nick"], 2)
-        await service.grant_premium(second_place["nick"], 2)
-        await service.grant_premium(third_place["nick"], 1)
+        # 5. Находим пользователей
+        first_user_result = await session.execute(
+            select(User).filter(User.nick == first_place["nick"])
+        )
+        first_user = first_user_result.scalar_one_or_none()
+        
+        second_user_result = await session.execute(
+            select(User).filter(User.nick == second_place["nick"])
+        )
+        second_user = second_user_result.scalar_one_or_none()
+        
+        third_user_result = await session.execute(
+            select(User).filter(User.nick == third_place["nick"])
+        )
+        third_user = third_user_result.scalar_one_or_none()
+        
+        # 6. 🔥 Начисляем ИЗ НАСТРОЕК (не захардкожено!)
+        if first_user:
+            first_user.lifetime_boxes_opened += boxes_1
+            first_user.premium_streams_left += pa_1
+            logger.info(f"1st place {first_user.nick}: +{boxes_1} boxes, +{pa_1} PA")
+        
+        if second_user:
+            second_user.lifetime_boxes_opened += boxes_2
+            second_user.premium_streams_left += pa_2
+            logger.info(f"2nd place {second_user.nick}: +{boxes_2} boxes, +{pa_2} PA")
+        
+        if third_user:
+            third_user.lifetime_boxes_opened += boxes_3
+            third_user.premium_streams_left += pa_3
+            logger.info(f"3rd place {third_user.nick}: +{boxes_3} boxes, +{pa_3} PA")
+        
         await session.commit()
 
-        # 3. Заполняем очередь и отправляем старт
+        # 7. Запускаем анимацию
         raffle_state["queue"] = steps
         raffle_state["is_active"] = True
         raffle_state["participants"] = participants

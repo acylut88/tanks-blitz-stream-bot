@@ -1,16 +1,17 @@
 """
 FastAPI приложение и управление жизненным циклом бота
 """
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from app.config import settings
-from app.core.parser import ChatParser
-from app.services.message_dispatcher import MessageDispatcher
-from app.services.user_sync import UserSyncService
-from app.core.vk_api import VKLiveAPIClient
-from app.bot.handler import MessageHandler
 from app.api.routes import router as web_router
 from app.api.websocket import router as websocket_router
+from app.bot.handler import MessageHandler
+from app.config import settings
+from app.core.parser import ChatParser
+from app.core.vk_api import VKLiveAPIClient
+from app.services.message_dispatcher import MessageDispatcher
+from app.services.settings_service import SettingsService
+from app.services.user_sync import UserSyncService
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 import structlog
 
 logger = structlog.get_logger()
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     global dispatcher, parser, handler
     
     logger.info("Starting Tanks Blitz Bot...")
+
     
     # 1. Инициализация сервисов
     vk_api = VKLiveAPIClient(settings.vk_channel_name)
@@ -65,6 +67,9 @@ async def lifespan(app: FastAPI):
     await dispatcher.stop()
     await parser.stop()
     logger.info("Bot stopped")
+
+    # 4. Инициализируем настройки по умолчанию
+    await SettingsService.initialize_defaults()
 
 
 app = FastAPI(title="Tanks Blitz Stream Bot", lifespan=lifespan)
