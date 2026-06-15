@@ -65,19 +65,19 @@ class MessageHandler:
             logger.debug("Not a reward notification", text=clean_text)
             return
 
-        # 3. ИЗВЛЕКАЕМ ПЕРЕМЕННЫЕ (строго до проверки!)
+        # 3. Извлекаем переменные
         nick = match.group(1).strip()
-        reward_name = match.group(2).strip()  # ← Вот здесь определяется reward_name
+        reward_name = match.group(2).strip()
         _count = int(match.group(3))
 
-        # 4. 🔒 КРИТИЧНО: Фильтр по названию награды
+        # 4. Фильтр по названию награды
         if reward_name != settings.allowed_reward_name:
             logger.debug("Ignored reward: wrong name", reward=reward_name, expected=settings.allowed_reward_name)
             return
 
         logger.info("Reward notification detected", nick=nick, reward=reward_name)
 
-        # 5. Дальше идёт остальная логика (БД, рулетка, начисление БМ...)
+        # 5. Основная логика
         try:
             async with async_session() as session:
                 user_service = UserService(session)
@@ -85,22 +85,58 @@ class MessageHandler:
                 # 1. Находим или создаем пользователя
                 user = await user_service.get_or_create(nick)
                 
+                # 🔥 ДОБАВЛЕНО: Явное обновление объекта из БД
+                await session.refresh(user)
+                
                 # 2. Получаем активную сессию стрима
                 stream_session = await user_service.get_active_session()
                 if not stream_session:
                     logger.warning("Reward received but no active stream session", nick=nick)
-                    await session.commit()  # Коммитим создание пользователя
+                    await session.commit()
                     return
 
-                # 3. Получаем или создаем статистику для текущего стрима
+                # 3. Получаем или создаем статистику
                 stats = await user_service.get_or_create_stream_stats(user.id, stream_session.id)
                 
                 # 4. Инкрементируем счетчик активаций
                 stats.activations_count += 1
-                
                 current_activation = stats.activations_count
                 
-                # 5. Рассчитываем награды
+                # 🔥 НОВОЕ: Проверяем отложенные ящики
+                pending_boxes = user.pending_boxes if hasattr(user, 'pending_boxes') else 0
+                
+                # 🔥 ЛОГИРОВАНИЕ: Показываем текущее значение pending_boxes
+                logger.info(f"User {nick} has {pending_boxes} pending boxes")
+                
+                pending_bm = 0
+                pending_drops = ""
+                
+                if pending_boxes > 0:
+                    logger.info(f"Opening {pending_boxes} pending boxes for {nick}")
+                    
+                    # Открываем все pending boxes
+                    pending_loot = RewardService.roll_loot(pending_boxes)
+                    pending_bm = RewardService.calculate_bm(pending_loot)
+                    
+                    # Начисляем танки из pending boxes
+                    user.lifetime_tanks_lt += pending_loot.get(TankType.LT, 0)
+                    user.lifetime_tanks_st += pending_loot.get(TankType.CT, 0)
+                    user.lifetime_tanks_tt += pending_loot.get(TankType.TT, 0)
+                    user.lifetime_tanks_pt += pending_loot.get(TankType.PT, 0)
+                    user.lifetime_boxes_opened += pending_boxes
+                    
+                    # 🔥 ВАЖНО: Добавляем БМ в текущую сессию!
+                    stats.current_bm += pending_bm
+
+                    # Форматируем дропы
+                    pending_drops = RewardService.format_drops(pending_loot)
+                    
+                    # Сбрасываем счетчик
+                    user.pending_boxes = 0
+                    
+                    logger.info(f"Pending boxes opened: {pending_bm} BM gained", loot=pending_loot)
+                
+                # 5. Рассчитываем награды для текущей активации
                 has_premium = user.premium_streams_left > 0
                 box_count = RewardService.calculate_boxes(current_activation, has_premium)
                 
@@ -116,19 +152,26 @@ class MessageHandler:
                 user.lifetime_tanks_tt += loot.get(TankType.TT, 0)
                 user.lifetime_tanks_pt += loot.get(TankType.PT, 0)
                 
-                # Если это 12-я активация — выдаём ПА
+                # Если 12-я активация — выдаём ПА
                 if current_activation == 12:
                     user.premium_streams_left += 1
                     user.lifetime_streams_with_premium += 1
                     logger.info("PA token granted for 12 activations", nick=nick)
                 
-                # Коммитим изменения в БД
+                # Коммитим
                 await session.commit()
                 
-                # 8. Формируем и отправляем отчет в ЛС
+                # 8. Формируем сообщения
                 drops_str = RewardService.format_drops(loot)
                 template_key = "reward_peak" if current_activation == 6 else ("reward_final" if current_activation == 12 else "reward_normal")
                 
+                # 🔥 Если были pending boxes, отправляем бонус
+                if pending_boxes > 0:
+                    bonus_msg = f"🎁 Бонус за прошлый стрим:\n{pending_drops}\n+{pending_bm} БМ"
+                    await self.dispatcher.add_message(nick, bonus_msg, priority=1)
+                    logger.info(f"Bonus message sent to {nick}")
+                
+                # Основное сообщение
                 msg_text = MSG_TEMPLATES[template_key].format(
                     activation=current_activation,
                     drops=drops_str,
@@ -138,7 +181,7 @@ class MessageHandler:
                 
                 await self.dispatcher.add_message(nick, msg_text, priority=1)
                 
-                # 9. Отдельное сообщение для редкого дропа (ПТ-САУ)
+                # Редкий дроп
                 if loot.get(TankType.PT, 0) > 0:
                     rare_msg = MSG_TEMPLATES["rare_drop"].format(activation=current_activation)
                     await self.dispatcher.add_message(nick, rare_msg, priority=2)

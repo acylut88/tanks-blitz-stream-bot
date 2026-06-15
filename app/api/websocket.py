@@ -201,21 +201,21 @@ async def run_raffle_process():
         )
         third_user = third_user_result.scalar_one_or_none()
         
-        # 6. 🔥 Начисляем ИЗ НАСТРОЕК (не захардкожено!)
+        # 6. 🔥 Начисляем ОТЛОЖЕННЫЕ ящики (pending_boxes)
         if first_user:
-            first_user.lifetime_boxes_opened += boxes_1
-            first_user.premium_streams_left += pa_1
-            logger.info(f"1st place {first_user.nick}: +{boxes_1} boxes, +{pa_1} PA")
-        
+            first_user.pending_boxes = (first_user.pending_boxes or 0) + boxes_1
+            first_user.premium_streams_left = (first_user.premium_streams_left or 0) + pa_1
+            logger.info(f"1st place {first_user.nick}: +{boxes_1} pending boxes, +{pa_1} PA")
+
         if second_user:
-            second_user.lifetime_boxes_opened += boxes_2
-            second_user.premium_streams_left += pa_2
-            logger.info(f"2nd place {second_user.nick}: +{boxes_2} boxes, +{pa_2} PA")
-        
+            second_user.pending_boxes = (second_user.pending_boxes or 0) + boxes_2
+            second_user.premium_streams_left = (second_user.premium_streams_left or 0) + pa_2
+            logger.info(f"2nd place {second_user.nick}: +{boxes_2} pending boxes, +{pa_2} PA")
+
         if third_user:
-            third_user.lifetime_boxes_opened += boxes_3
-            third_user.premium_streams_left += pa_3
-            logger.info(f"3rd place {third_user.nick}: +{boxes_3} boxes, +{pa_3} PA")
+            third_user.pending_boxes = (third_user.pending_boxes or 0) + boxes_3
+            third_user.premium_streams_left = (third_user.premium_streams_left or 0) + pa_3
+            logger.info(f"3rd place {third_user.nick}: +{boxes_3} pending boxes, +{pa_3} PA")
         
         await session.commit()
 

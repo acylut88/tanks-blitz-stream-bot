@@ -20,8 +20,11 @@ class User(Base):
     premium_streams_left = Column(Integer, default=0)  # Жетоны ПА
     lifetime_streams_with_premium = Column(Integer, default=0)  # На скольких стримах использовал ПА
     
-    # Lifetime статистика
+    # Статистика ящиков
     lifetime_boxes_opened = Column(Integer, default=0)
+    pending_boxes = Column(Integer, default=0)
+    
+    # Lifetime статистика
     lifetime_tanks_lt = Column(Integer, default=0)
     lifetime_tanks_st = Column(Integer, default=0)
     lifetime_tanks_tt = Column(Integer, default=0)
