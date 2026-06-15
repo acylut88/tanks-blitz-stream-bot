@@ -1,16 +1,18 @@
 """
 Web и API маршруты для админки, дашборда и оверлеев
 """
-from datetime import datetime, timezone
-from fastapi import APIRouter, Request, Response, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
 from app.api.websocket import run_raffle_process
 from app.config import settings
+from app.core.cnst_Bot import TankType
+from app.core.rewards import RewardService
 from app.database.models import User, StreamStats, StreamSession
 from app.database.session import async_session
 from app.services.settings_service import SettingsService
 from app.services.user_service import UserService
+from datetime import datetime, timezone
+from fastapi import APIRouter, Request, Response, Form, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func, desc, distinct
 import asyncio
 import structlog
@@ -198,6 +200,74 @@ async def update_delay_api(request: dict):
         dispatcher.send_delay = new_delay
         logger.info("Dispatcher delay updated", delay=new_delay)
     return {"message": f"Задержка изменена на {new_delay} сек"}
+
+@router.post("/api/admin/grant-loot")
+async def grant_loot_api(request: dict):
+    """Ручная выдача лутбоксов/танков через админку"""
+    user_nick = request.get("nick")
+    box_count = request.get("box_count", 1)
+    
+    if not user_nick or box_count <= 0:
+        raise HTTPException(status_code=400, detail="Укажите ник и количество > 0")
+    
+    async with async_session() as session:
+        # 1. Ищем пользователя
+        user_result = await session.execute(select(User).filter(User.nick == user_nick))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        
+        # 2. Крутим рулетку (та же логика, что при открытии за баллы)
+        loot = RewardService.roll_loot(box_count)
+        gained_bm = RewardService.calculate_bm(loot)
+        
+        # 3. Обновляем пожизненную статистику
+        user.lifetime_tanks_lt += loot.get(TankType.LT, 0)
+        user.lifetime_tanks_st += loot.get(TankType.CT, 0)
+        user.lifetime_tanks_tt += loot.get(TankType.TT, 0)
+        user.lifetime_tanks_pt += loot.get(TankType.PT, 0)
+        user.lifetime_boxes_opened += box_count
+        
+        # 4. Добавляем БМ в активную сессию (если стрим идет)
+        active_session_result = await session.execute(
+            select(StreamSession.id)
+            .filter(StreamSession.ended_at.is_(None))
+            .order_by(StreamSession.started_at.desc())
+            .limit(1)
+        )
+        active_session_id = active_session_result.scalar_one_or_none()
+        
+        if active_session_id:
+            stats_result = await session.execute(
+                select(StreamStats).filter(
+                    StreamStats.user_id == user.id,
+                    StreamStats.session_id == active_session_id
+                )
+            )
+            stats = stats_result.scalar_one_or_none()
+            if not stats:
+                stats = StreamStats(user_id=user.id, session_id=active_session_id)
+                session.add(stats)
+            stats.current_bm += gained_bm
+            
+        await session.commit()
+        logger.info(f"Admin granted {box_count} boxes to {user_nick}: {loot}")
+        
+        return {
+            "message": f"Выдано {box_count} боксов",
+            "loot": RewardService.format_drops(loot),
+            "bm": gained_bm
+        }
+
+@router.get("/api/admin/users-list")
+async def get_users_list_api():
+    """Получить список всех ников для автодополнения"""
+    async with async_session() as session:
+        result = await session.execute(
+            select(User.nick).order_by(User.nick)
+        )
+        nicks = result.scalars().all()
+        return {"users": nicks}
 
 
 # --- API для настроек ---
