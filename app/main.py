@@ -51,6 +51,9 @@ async def lifespan(app: FastAPI):
     
     # 2. Запуск фоновых задач
     await dispatcher.start()
+    # 🔥 Добавляем в app.state
+    app.state.dispatcher = dispatcher
+
     # parser.start() блокирует, поэтому запускаем в фоне
     import asyncio
     parser_task = asyncio.create_task(parser.start())

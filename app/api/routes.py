@@ -17,7 +17,6 @@ from sqlalchemy import select, func, desc, distinct
 import asyncio
 import structlog
 
-
 logger = structlog.get_logger()
 
 router = APIRouter()
@@ -202,10 +201,10 @@ async def update_delay_api(request: dict):
     return {"message": f"Задержка изменена на {new_delay} сек"}
 
 @router.post("/api/admin/grant-loot")
-async def grant_loot_api(request: dict):
+async def grant_loot_api(request: Request, body: dict):  # ← Добавляем request
     """Ручная выдача лутбоксов/танков через админку"""
-    user_nick = request.get("nick")
-    box_count = request.get("box_count", 1)
+    user_nick = body.get("nick")
+    box_count = body.get("box_count", 1)
     
     if not user_nick or box_count <= 0:
         raise HTTPException(status_code=400, detail="Укажите ник и количество > 0")
@@ -217,7 +216,7 @@ async def grant_loot_api(request: dict):
         if not user:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
         
-        # 2. Крутим рулетку (та же логика, что при открытии за баллы)
+        # 2. Крутим рулетку
         loot = RewardService.roll_loot(box_count)
         gained_bm = RewardService.calculate_bm(loot)
         
@@ -228,7 +227,7 @@ async def grant_loot_api(request: dict):
         user.lifetime_tanks_pt += loot.get(TankType.PT, 0)
         user.lifetime_boxes_opened += box_count
         
-        # 4. Добавляем БМ в активную сессию (если стрим идет)
+        # 4. Добавляем БМ в активную сессию
         active_session_result = await session.execute(
             select(StreamSession.id)
             .filter(StreamSession.ended_at.is_(None))
@@ -251,11 +250,18 @@ async def grant_loot_api(request: dict):
             stats.current_bm += gained_bm
             
         await session.commit()
+        
+        # 🔥 5. ОТПРАВЛЯЕМ ЛС ЧЕРЕЗ DISPATCHER
+        dispatcher = request.app.state.dispatcher
+        drops_str = RewardService.format_drops(loot)
+        msg_text = f"Ручная выдача от админа: {drops_str} | +{gained_bm} БМ"
+        await dispatcher.add_message(user_nick, msg_text, priority=1)
+        
         logger.info(f"Admin granted {box_count} boxes to {user_nick}: {loot}")
         
         return {
             "message": f"Выдано {box_count} боксов",
-            "loot": RewardService.format_drops(loot),
+            "loot": drops_str,
             "bm": gained_bm
         }
 
