@@ -231,6 +231,37 @@
                 </div>
             </div>
 
+            <!-- 🔥 НОВОЕ: Настройки выпадения ПА из бокса -->
+            <div class="bg-gray-800 p-6 rounded-lg border border-orange-500/30">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-orange-500">🎖 Настройки выпадения ПА из бокса</h2>
+                    <button @click="savePASettings()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded transition">💾 Сохранить</button>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1 text-gray-300">Базовый шанс (0.005 = 0.5%)</label>
+                        <input type="number" step="0.001" x-model.number="settings['pa.base_chance']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-orange-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Шанс на 1-м боксе (например, 0.005)</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 text-gray-300">Шаг увеличения (0.001 = 0.1%)</label>
+                        <input type="number" step="0.001" x-model.number="settings['pa.chance_step']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-orange-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Насколько растёт шанс за каждый бокс</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 text-gray-300">Гарант (номер бокса)</label>
+                        <input type="number" x-model.number="settings['pa.pity_threshold']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-orange-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">На каком боксе шанс становится 100%</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1 text-gray-300">Максимум ПА за стрим</label>
+                        <input type="number" x-model.number="settings['pa.max_per_stream']" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:border-orange-500 focus:outline-none">
+                        <p class="text-xs text-gray-500 mt-1">Сколько раз может выпасть ПА за один стрим</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Настройки диспетчера -->
             <div class="bg-gray-800 p-6 rounded-lg">
                 <div class="flex justify-between items-center mb-4">
@@ -318,15 +349,22 @@
                 msg: '',
                 notification: '',
                 settings: {
+                    // Настройки Анимации выбора жертвы по умолчанию
                     'raffle.animSettings.totalDuration': 10.0,
                     'raffle.animSettings.fastRatio': 0.80,
                     'raffle.animSettings.pausePhase': 3.0,
+                    // Настройки Наград за 1-3 места по умолчанию
                     'raffle.prizes.1': '📦 10 лутбоксов (10 танков)',
                     'raffle.prizes.2': '📦 8 лутбоксов (8 танков)',
                     'raffle.prizes.3': '📦 6 лутбоксов (6 танков)',
                     'raffle.prizes.eliminated': ' 4 лутбокса (4 танка)',
                     'dispatcher.send_delay': 0.4,
-                    'dispatcher.overload_threshold': 50
+                    'dispatcher.overload_threshold': 50,
+                    // Настройки ПА по умолчанию
+                    'pa.base_chance': 0.005,
+                    'pa.chance_step': 0.001,
+                    'pa.pity_threshold': 50,
+                    'pa.max_per_stream': 1,
                 },
                 editingUser: null,
                 autoRefreshInterval: null,  // Для автообновления
@@ -443,6 +481,25 @@
                     this.showNotification('✅ Настройки рулетки сохранены!');
                 },
 
+                async savePASettings() {
+                    const keys = [
+                        'pa.base_chance',
+                        'pa.chance_step',
+                        'pa.pity_threshold',
+                        'pa.max_per_stream'
+                    ];
+                    
+                    for (const key of keys) {
+                        await fetch(`/api/admin/settings/${key}`, {
+                            method: 'PATCH',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({value: this.settings[key]})
+                        });
+                    }
+                    
+                    this.showNotification('✅ Настройки выпадения ПА сохранены!');
+                },
+
                 async saveDispatcherSettings() {
                     const keys = [
                         'dispatcher.send_delay',
@@ -484,6 +541,7 @@
                 grantCount: 1,
                 grantMsg: '',
                 usersList: [],
+                isGranting: false,  // флаг блокировки кнопки
 
                 // Загружаем список пользователей при инициализации
                 async loadUsersList() {
@@ -498,29 +556,42 @@
 
                 // Метод ручной выдачи
                 async grantLoot() {
-                    if (!this.grantNick || this.grantCount < 1) {
-                        this.grantMsg = '️ Заполните ник и количество!';
+                    // 🔥 ЗАЩИТА ОТ ПОВТОРНОГО КЛИКА
+                    if (this.isGranting) {
+                        this.grantMsg = '⏳ Подождите, идёт обработка...';
                         return;
                     }
                     
-                    this.grantMsg = '⏳ Отправка...';
-                    const res = await fetch('/api/admin/grant-loot', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({nick: this.grantNick, box_count: this.grantCount})
-                    });
-                    
-                    const data = await res.json();
-                    if (res.ok) {
-                        this.grantMsg = `✅ ${data.message} | ${data.loot} (+${data.bm} БМ)`;
-                        this.grantNick = '';
-                        this.grantCount = 1;
-                        await this.loadUsers(); // Обновляем таблицу
-                    } else {
-                        this.grantMsg = `❌ Ошибка: ${data.detail}`;
+                    if (!this.grantNick || this.grantCount < 1) {
+                        this.grantMsg = '⚠️ Заполните ник и количество!';
+                        return;
                     }
                     
-                    // Скрываем сообщение через 5 сек
+                    this.isGranting = true;  // Блокируем кнопку
+                    this.grantMsg = '⏳ Отправка...';
+                    
+                    try {
+                        const res = await fetch('/api/admin/grant-loot', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({nick: this.grantNick, box_count: this.grantCount})
+                        });
+                        
+                        const data = await res.json();
+                        if (res.ok) {
+                            this.grantMsg = `✅ ${data.message} | ${data.loot} (+${data.bm} БМ)`;
+                            this.grantNick = '';
+                            this.grantCount = 1;
+                            await this.loadUsers();
+                        } else {
+                            this.grantMsg = `❌ Ошибка: ${data.detail}`;
+                        }
+                    } catch (e) {
+                        this.grantMsg = `❌ Ошибка сети: ${e.message}`;
+                    } finally {
+                        this.isGranting = false;  // Разблокируем кнопку
+                    }
+                    
                     setTimeout(() => this.grantMsg = '', 5000);
                 },
 

@@ -1,16 +1,16 @@
 """
 Главный обработчик сообщений и маршрутизатор
 """
-import re
-from typing import Dict, Any
-
-from sqlalchemy import text
+from app.config import settings
 from app.core.rewards import RewardService
 from app.core.cnst_Bot import TankType, MSG_TEMPLATES
-from app.services.user_service import UserService
-from app.services.message_dispatcher import MessageDispatcher
 from app.database.session import async_session
-from app.config import settings
+from app.services.message_dispatcher import MessageDispatcher
+from app.services.pa_chance_service import PAChanceService
+from app.services.user_service import UserService
+from sqlalchemy import text
+from typing import Dict, Any
+import re
 import structlog
 
 logger = structlog.get_logger()
@@ -34,6 +34,11 @@ class MessageHandler:
         is_system = msg_data.get("is_system", False)
 
         if not mid or not text:
+            return
+        
+        # Игнорируем собственные сообщения
+        if sender == settings.vk_channel_owner_name:
+            logger.debug("Ignoring own message", text=text)
             return
 
         logger.debug("Message received", sender=sender, text=text)
@@ -152,11 +157,8 @@ class MessageHandler:
                 user.lifetime_tanks_tt += loot.get(TankType.TT, 0)
                 user.lifetime_tanks_pt += loot.get(TankType.PT, 0)
                 
-                # Если 12-я активация — выдаём ПА
-                if current_activation == 12:
-                    user.premium_streams_left += 1
-                    user.lifetime_streams_with_premium += 1
-                    logger.info("PA token granted for 12 activations", nick=nick)
+                # 🔥 НОВОЕ: Проверяем шанс выпадения ПА
+                pa_dropped = await PAChanceService.try_roll_pa(user, stats)
                 
                 # Коммитим
                 await session.commit()
@@ -181,7 +183,13 @@ class MessageHandler:
                 
                 await self.dispatcher.add_message(nick, msg_text, priority=1)
                 
-                # Редкий дроп
+                # 🔥 НОВОЕ: Если выпало ПА - отправляем отдельное сообщение
+                if pa_dropped:
+                    pa_msg = MSG_TEMPLATES["pa_drop"]
+                    await self.dispatcher.add_message(nick, pa_msg, priority=2)
+                    logger.info("PA drop notification sent", nick=nick)
+
+                # 9. Отдельное сообщение для редкого дропа (ПТ-САУ)
                 if loot.get(TankType.PT, 0) > 0:
                     rare_msg = MSG_TEMPLATES["rare_drop"].format(activation=current_activation)
                     await self.dispatcher.add_message(nick, rare_msg, priority=2)

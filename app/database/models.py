@@ -23,6 +23,7 @@ class User(Base):
     # Статистика ящиков
     lifetime_boxes_opened = Column(Integer, default=0)
     pending_boxes = Column(Integer, default=0)
+    boxes_since_last_pa = Column(Integer, default=0)  # Счётчик боксов с последнего ПА
     
     # Lifetime статистика
     lifetime_tanks_lt = Column(Integer, default=0)
@@ -48,6 +49,9 @@ class StreamSession(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     ended_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Получено ПА за этот стрим (макс 1)
+    pa_received_this_stream = Column(Integer, default=0)  
     
     # Победители
     winner_1_nick = Column(String(100), nullable=True)
@@ -82,6 +86,8 @@ class StreamStats(Base):
     # Relationships
     user = relationship("User", back_populates="stream_stats")
     session = relationship("StreamSession", back_populates="stream_stats")
+
+    pa_received_this_stream = Column(Integer, default=0)  # Получено ПА за этот стрим
     
     def __repr__(self):
         return f"<StreamStats(user_id={self.user_id}, bm={self.current_bm}, activations={self.activations_count})>"

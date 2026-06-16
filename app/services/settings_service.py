@@ -171,6 +171,28 @@ class SettingsService:
                 "description": "Количество ПА за 3 место",
                 "category": "raffle"
             },
+
+            # Настройки шанса выпадения ПА из бокса
+            "pa.base_chance": {
+                "value": 0.005,  # 0.5% базовый (итого 0.6% на 1 боксе)
+                "description": "Базовый шанс выпадения ПА (добавляется к номеру бокса × step)",
+                "category": "pa"
+            },
+            "pa.chance_step": {
+                "value": 0.001,  # 0.1% за каждый бокс
+                "description": "Шаг увеличения шанса за каждый открытый бокс",
+                "category": "pa"
+            },
+            "pa.pity_threshold": {
+                "value": 50,
+                "description": "Гарантированное выпадение ПА на этом боксе",
+                "category": "pa"
+            },
+            "pa.max_per_stream": {
+                "value": 1,
+                "description": "Максимум бесплатных ПА за один стрим",
+                "category": "pa"
+            },
         }
         
         for key, data in defaults.items():

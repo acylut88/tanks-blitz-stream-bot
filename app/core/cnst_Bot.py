@@ -52,5 +52,6 @@ MSG_TEMPLATES = {
     "reward_peak": "🚀 Поставка #{activation} (Пик!) | 🛡 {drops} | ️ +{bm} БМ | 📈 Армия: {total_bm} БМ",
     "reward_final": "🏆 Поставка #{activation} | 🛡 {drops} | ️ +{bm} БМ | 📈 Армия: {total_bm} БМ |  ОШ на след. стрим!",
     "rare_drop": "✨ РЕДКОСТЬ! ПТ-САУ (+4 БМ) в поставке #{activation}!",
-    "stats": "📊 Командир {nick} | ️ {bm} БМ | 🛡 ЛТ×{lt} СТ×{ct} ТТ×{tt} ПТ×{pt} | 🎖 ОШ: {premium} | Активаций: {activations}/12"
+    "stats": "📊 Командир {nick} | ️ {bm} БМ | 🛡 ЛТ×{lt} СТ×{ct} ТТ×{tt} ПТ×{pt} | 🎖 ОШ: {premium} | Активаций: {activations}/12",
+    "pa_drop": "🎉🎖️ РЕДЧАЙШИЙ ДРОП! Командир, вам выпал жетон Офицерского Штаба! Активируется со след. стрима!"
 }
