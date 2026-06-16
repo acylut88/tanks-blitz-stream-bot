@@ -1,0 +1,28 @@
+(.venv) PS F:\__LESSONS_Python\projects\VKStream_TanksBlitzLesta_Qwen> pytest tests/test_pa_chance.py -v
+============================================= test session starts =============================================
+platform win32 -- Python 3.12.6, pytest-7.4.4, pluggy-1.6.0 -- F:\__LESSONS_Python\projects\VKStream_TanksBlitzLesta_Qwen\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: F:\__LESSONS_Python\projects\VKStream_TanksBlitzLesta_Qwen
+plugins: anyio-4.13.0, asyncio-0.23.3
+asyncio: mode=Mode.STRICT
+collected 10 items                                                                                             
+
+tests/test_pa_chance.py::TestPACalculation::test_base_chance_on_first_box PASSED                         [ 10%]
+tests/test_pa_chance.py::TestPACalculation::test_chance_on_fifth_box PASSED                              [ 20%]
+tests/test_pa_chance.py::TestPACalculation::test_chance_on_twenty_fifth_box PASSED                       [ 30%]
+tests/test_pa_chance.py::TestPACalculation::test_chance_on_fiftieth_box_guarantee PASSED                 [ 40%]
+tests/test_pa_chance.py::TestPACalculation::test_chance_beyond_fifty_stays_100 PASSED                    [ 50%]
+tests/test_pa_chance.py::TestPARollLogic::test_pa_dropped_on_guarantee PASSED                            [ 60%]
+tests/test_pa_chance.py::TestPARollLogic::test_pa_not_dropped_on_low_chance PASSED                       [ 70%]
+tests/test_pa_chance.py::TestPARollLogic::test_pa_limit_per_stream PASSED                                [ 80%]
+tests/test_pa_chance.py::TestEdgeCases::test_zero_boxes_since_last_pa PASSED                             [ 90%]
+tests/test_pa_chance.py::TestEdgeCases::test_custom_pity_threshold PASSED                                [100%]
+
+============================================== warnings summary ===============================================
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+  F:\__LESSONS_Python\projects\VKStream_TanksBlitzLesta_Qwen\.venv\Lib\site-packages\pydantic\_internal\_config.py:271: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================================== 10 passed, 1 warning in 0.34s ========================================
+(.venv) PS F:\__LESSONS_Python\projects\VKStream_TanksBlitzLesta_Qwen> 
